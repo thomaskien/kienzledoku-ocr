@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.2 – 31.08.2026
+
+- Bundesmedikationsplan ohne ASCII-/Tabellentrenner und ohne Nummerierung
+- Jedes Medikament erhält vier eigene Zeilen für Name, Dosis/PZN, Einnahme und
+  Kommentar; zwischen zwei Medikamenten steht genau eine Leerzeile
+- Auch fehlende Kommentare werden ausdrücklich als `Kommentar: -` ausgegeben
+
 ## 1.5.1 – 31.08.2026
 
 - Data-Matrix-Decoder mit Ubuntu 24.04s älterer `zxingcpp`-API kompatibel:

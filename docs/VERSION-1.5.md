@@ -56,3 +56,10 @@ Kann die AMDB nicht gelesen werden oder scheitert eine einzelne PZN-Abfrage,
 wird die Seite nicht durch eine möglicherweise unvollständige strukturierte
 Ausgabe ersetzt. Sie durchläuft stattdessen die normale OCR; weitere Dokumente
 werden weiterhin verarbeitet.
+
+## Textausgabe ab 1.5.2
+
+Die Medikamentenausgabe verwendet keine ASCII-Tabelle und keine Nummerierung.
+Jedes Medikament steht in vier eigenen Zeilen für Name, Dosis/PZN, Einnahme und
+Kommentar. Zwischen zwei Medikamenten steht genau eine Leerzeile. Dadurch bleibt
+die Darstellung auch im T2med-Textfeld stabil.

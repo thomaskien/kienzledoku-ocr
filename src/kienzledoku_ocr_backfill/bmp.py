@@ -377,9 +377,8 @@ def format_bmp(plan: BmpPlan, resolver: Optional[Any] = None) -> FormattedBmp:
 
     pzns: list[str] = []
     unresolved: list[str] = []
-    medication_number = 0
     for section in plan.sections:
-        table_rows: list[tuple[str, str, str, str, Optional[str]]] = []
+        medication_blocks: list[tuple[str, str, str, str]] = []
         section_comments: list[str] = []
         for entry in section.entries:
             if isinstance(entry, BmpFreeText):
@@ -392,7 +391,6 @@ def format_bmp(plan: BmpPlan, resolver: Optional[Any] = None) -> FormattedBmp:
                 continue
             if not isinstance(entry, BmpMedication):
                 continue
-            medication_number += 1
             resolved, failed_pzn = _resolved_medication(entry, resolver)
             if entry.pzn:
                 pzns.append(entry.pzn)
@@ -430,8 +428,6 @@ def format_bmp(plan: BmpPlan, resolver: Optional[Any] = None) -> FormattedBmp:
                 comments.append(f"Grund: {_one_line(entry.reason)}")
             if entry.extra:
                 comments.append(_one_line(entry.extra))
-            if entry.pzn:
-                comments.append(f"PZN {entry.pzn}")
             if structured_dosage:
                 intake = "-".join((morning, noon, evening, night))
             elif entry.dosage_text:
@@ -440,25 +436,24 @@ def format_bmp(plan: BmpPlan, resolver: Optional[Any] = None) -> FormattedBmp:
                 intake = "-"
             if entry.dosage_unit and intake != "-":
                 intake += f" {entry.dosage_unit}"
-            table_rows.append(
+            dose_and_pzn = dose
+            if entry.pzn:
+                dose_and_pzn += f" // PZN {entry.pzn}"
+            medication_blocks.append(
                 (
-                    str(medication_number),
                     medication_name,
-                    dose,
-                    intake,
-                    "; ".join(comments) or None,
+                    dose_and_pzn,
+                    f"Einnahme: {intake}",
+                    f"Kommentar: {'; '.join(comments) or '-'}",
                 )
             )
 
         lines.extend(["", f"Überschrift: {section.title or 'Medikation'}"])
-        if table_rows:
-            lines.append("## Nr\t| Medikament\t| Dosis\t| Einnahme")
-            for number, medication, dose, intake, comment in table_rows:
-                lines.append(f"{number}\t| {medication}\t| {dose}\t| {intake}")
-                if comment:
-                    lines.append(f"\tKommentar: {comment}")
-        for comment in section_comments:
-            lines.append(f"Kommentar: {comment}")
+        for medication, dose_and_pzn, intake, comment in medication_blocks:
+            lines.extend(["", medication, dose_and_pzn, intake, comment])
+        if section_comments:
+            lines.append("")
+            lines.extend(f"Kommentar: {comment}" for comment in section_comments)
 
     lines.extend(["", "----- ENDE BUNDESMEDIKATIONSPLAN -----"])
 

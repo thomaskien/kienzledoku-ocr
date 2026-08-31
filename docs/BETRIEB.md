@@ -106,10 +106,11 @@ Reihenfolge:
 2. Journal auf `dry_run`, plausible Zeichenzahl und Hash prüfen.
 3. In der Konsole muss `Medikationsplan erkannt: Seite 1` erscheinen. Der
    erzeugte Text enthält einen vollständigen BEGINN-/ENDE-BMP-Block und die
-   tabulatorbasierte Medikamententabelle. Seite 2 bleibt normaler OCR-Text.
+   vierzeilige Ausgabe je Medikament mit einer Leerzeile dazwischen. Seite 2
+   bleibt normaler OCR-Text.
 4. Mit `--apply` nur diese ObjectId schreiben.
-5. In T2med kontrollieren, dass Titel/alter Text, BMP-Tabelle, übriger OCR-Text
-   und Footer korrekt sichtbar sind.
+5. In T2med kontrollieren, dass Titel/alter Text, mehrzeilige BMP-Medikamente,
+   übriger OCR-Text und Footer korrekt sichtbar sind.
 6. Journal muss zunächst `update_prepared` und danach `updated` mit höherer `revisionAfter` enthalten.
 7. Denselben Befehl erneut ausführen; erwartet wird `already_ocr` ohne CDN-Download oder APS-Update.
 

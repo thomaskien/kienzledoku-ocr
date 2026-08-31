@@ -75,9 +75,15 @@ class BmpTests(unittest.TestCase):
         self.assertIn("Ausstellungsdatum: 31.08.2026 10:15", formatted.text)
         self.assertIn("Ausgestellt durch: Dr. Test", formatted.text)
         self.assertIn("Überschrift: Dauermedikation", formatted.text)
-        self.assertIn("## Nr\t| Medikament\t| Dosis\t| Einnahme", formatted.text)
-        self.assertIn("1\t| Testmed 10 mg (Teststoff)\t| 10 mg, Tablette\t| 1-0-1/2-0 Stück", formatted.text)
-        self.assertIn("Kommentar: nach dem Essen; Grund: Bluthochdruck; PZN 09322739", formatted.text)
+        self.assertNotIn("## Nr", formatted.text)
+        self.assertNotIn("\t|", formatted.text)
+        self.assertIn(
+            "Testmed 10 mg (Teststoff)\n"
+            "10 mg, Tablette // PZN 09322739\n"
+            "Einnahme: 1-0-1/2-0 Stück\n"
+            "Kommentar: nach dem Essen; Grund: Bluthochdruck",
+            formatted.text,
+        )
         self.assertIn("Tablette", formatted.text)
         self.assertIn("nach dem Essen", formatted.text)
         self.assertIn("Kontrolle in vier Wochen", formatted.text)
@@ -92,8 +98,68 @@ class BmpTests(unittest.TestCase):
         )
         formatted = format_bmp(parse_bmp(payload.encode("iso-8859-1")))
         self.assertIn(
-            "1\t| Schmerzmittel\t| -\t| bei Bedarf Tropfen",
+            "Schmerzmittel\n"
+            "-\n"
+            "Einnahme: bei Bedarf Tropfen\n"
+            "Kommentar: -",
             formatted.text,
+        )
+
+    def test_two_medications_use_four_lines_and_one_blank_line(self):
+        payload = (
+            '<MP U="7B1E6D12A99847BFB5789C972C98B5F2" l="de-DE" v="027">'
+            '<P b="19750101" f="Test TK" g="Thomas"/>'
+            '<A n="Dr.med. Testus Testmann" t="2026-01-24T13:35:09"/>'
+            '<S t="DNR DNI DND DN-ITS">'
+            '<M m="1" p="9322739"/><M m="1" p="9531845"/>'
+            '</S></MP>'
+        )
+        products = {
+            "09322739": {
+                "name": "Tamsulosin - 1 A Pharma 0,4 mg Retardtabletten",
+                "form_long": "RetTabl",
+                "form_short": "RET",
+                "substances": [{"name": "Tamsulosin", "strength": "0,4 mg"}],
+            },
+            "09531845": {
+                "name": "Candesartan AAA 32 mg Tabletten",
+                "form_long": "Tabl",
+                "form_short": "TAB",
+                "substances": [
+                    {"name": "Candesartancilexetil", "strength": "32 mg"}
+                ],
+            },
+        }
+
+        class Resolver:
+            def lookup(self, pzn):
+                return products[pzn]
+
+        formatted = format_bmp(
+            parse_bmp(payload.encode("iso-8859-1")), Resolver()
+        )
+
+        self.assertEqual(
+            formatted.text,
+            "----- BEGINN BUNDESMEDIKATIONSPLAN -----\n"
+            "BUNDESMEDIKATIONSPLAN für Thomas Test TK, Geburtsdatum: 01.01.1975\n"
+            "Ausstellungsdatum: 24.01.2026 13:35\n"
+            "Ausgestellt durch: Dr.med. Testus Testmann\n"
+            "BMP-Version 2.7 | Plan-ID 7B1E6D12A99847BFB5789C972C98B5F2\n"
+            "\n"
+            "Überschrift: DNR DNI DND DN-ITS\n"
+            "\n"
+            "Tamsulosin - 1 A Pharma 0,4 mg Retardtabletten (Tamsulosin)\n"
+            "0,4 mg, RetTabl // PZN 09322739\n"
+            "Einnahme: 1-0-0-0\n"
+            "Kommentar: -\n"
+            "\n"
+            "Candesartan AAA 32 mg Tabletten (Candesartancilexetil)\n"
+            "32 mg, Tabl // PZN 09531845\n"
+            "Einnahme: 1-0-0-0\n"
+            "Kommentar: -\n"
+            "\n"
+            "----- ENDE BUNDESMEDIKATIONSPLAN -----",
         )
 
     def test_non_bmp_is_ignored_and_entities_are_rejected(self):
@@ -319,7 +385,13 @@ class MedicationPlanIntegrationTests(unittest.TestCase):
                     amdb_socket=socket,
                 ).scan(source)
         self.assertEqual(set(scan.pages), {1})
-        self.assertIn("1\t| Testmed", scan.pages[1])
+        self.assertIn(
+            "Testmed\n"
+            "Tablette // PZN 09322739\n"
+            "Einnahme: 1-0-1/2-0 Stück\n"
+            "Kommentar: nach dem Essen; Grund: Bluthochdruck",
+            scan.pages[1],
+        )
         self.assertIn("BEGINN BUNDESMEDIKATIONSPLAN", scan.pages[1])
         self.assertEqual(scan.diagnostics["amdbSchema"], "mmidata1")
         self.assertEqual(scan.diagnostics["amdbServerVersion"], "11.4.5-MariaDB")
