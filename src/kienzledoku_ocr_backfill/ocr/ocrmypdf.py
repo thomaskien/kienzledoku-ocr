@@ -57,6 +57,7 @@ class OcrmypdfBackend(OcrBackend):
         jobs: int = 2,
         timeout: float = 1800.0,
         tesseract_timeout: float = 300.0,
+        rotate_pages_threshold: float = 14.0,
     ) -> None:
         if jobs < 1:
             raise ValueError("OCR-Jobs muss mindestens 1 sein")
@@ -64,12 +65,15 @@ class OcrmypdfBackend(OcrBackend):
             raise ValueError("OCR-Timeouts müssen größer als 0 sein")
         if not language.strip():
             raise ValueError("OCR-Sprache darf nicht leer sein")
+        if rotate_pages_threshold < 0:
+            raise ValueError("OCR-Drehschwelle darf nicht negativ sein")
         self._ocrmypdf = ocrmypdf
         self._pdftotext = pdftotext
         self._language = language
         self._jobs = jobs
         self._timeout = timeout
         self._tesseract_timeout = tesseract_timeout
+        self._rotate_pages_threshold = rotate_pages_threshold
         self._mode_args: Optional[tuple[str, ...]] = None
 
     def _detect_mode_args(self) -> tuple[str, ...]:
@@ -106,6 +110,8 @@ class OcrmypdfBackend(OcrBackend):
                 "--tesseract-oem",
                 "1",
                 "--rotate-pages",
+                "--rotate-pages-threshold",
+                f"{self._rotate_pages_threshold:g}",
                 "--deskew",
                 "--clean",
                 "--oversample",

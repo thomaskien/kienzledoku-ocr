@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from .errors import VerificationError
+from .formatter import BLOCK_END
 from .models import DocumentSnapshot
 
 
@@ -17,15 +18,17 @@ def verify_update(
     after: DocumentSnapshot,
     expected_text: str,
     footer: str,
+    preserved_prefix: Optional[str] = None,
 ) -> None:
     problems: list[str] = []
 
     if after.text != expected_text:
         problems.append("gespeicherter Text stimmt nicht exakt mit dem Update überein")
-    if not after.text.endswith(footer):
-        problems.append("Footer fehlt oder steht nicht exakt am Textende")
-    if not after.text.startswith(before.text.rstrip()):
-        problems.append("vorheriger Text ist nicht als Präfix erhalten")
+    if not after.text.endswith(f"\n{footer}\n{BLOCK_END}"):
+        problems.append("Footer oder OCR-Endmarke fehlt am Textende")
+    prefix = before.text if preserved_prefix is None else preserved_prefix
+    if not after.text.startswith(prefix.rstrip()):
+        problems.append("zu erhaltender Basistext ist nicht als Präfix erhalten")
     if before.object_id != after.object_id:
         problems.append("objectId wurde verändert")
     if after.revision <= before.revision:

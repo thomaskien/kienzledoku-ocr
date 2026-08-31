@@ -4,9 +4,12 @@ from zoneinfo import ZoneInfo
 
 from kienzledoku_ocr_backfill.errors import VerificationError
 from kienzledoku_ocr_backfill.formatter import (
+    BLOCK_BEGIN,
+    BLOCK_END,
     compose_text,
     contains_ocr_marker,
     make_footer,
+    remove_managed_ocr_block,
 )
 from kienzledoku_ocr_backfill.models import DocumentSnapshot
 from kienzledoku_ocr_backfill.verifier import verify_update
@@ -21,12 +24,24 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(footer, "kienzledoku OCR v1.00, 30.08.2026 14:55")
         self.assertEqual(
             compose_text("Alter Titel  \n", "  OCR-Text\n", footer),
-            "Alter Titel\n\n\nOCR-Text\n\n" + footer,
+            "Alter Titel\n\n\n"
+            + BLOCK_BEGIN
+            + "\nOCR-Text\n\n"
+            + footer
+            + "\n"
+            + BLOCK_END,
         )
 
     def test_marker_is_idempotent_and_line_anchored(self):
         self.assertTrue(contains_ocr_marker("x\nkienzledoku OCR v1.00, 30.08.2026"))
+        self.assertTrue(contains_ocr_marker("x\n" + BLOCK_BEGIN + "\nunvollständig"))
         self.assertFalse(contains_ocr_marker("x kienzledoku OCR v1.00, 30.08.2026"))
+
+    def test_complete_managed_block_can_be_removed_exactly(self):
+        footer = "kienzledoku OCR v1.1, 31.08.2026 12:00"
+        value = compose_text("Titel", "Neuer OCR-Text", footer)
+        self.assertEqual(remove_managed_ocr_block(value), "Titel")
+        self.assertIsNone(remove_managed_ocr_block(value.removesuffix(BLOCK_END)))
 
 
 class VerifierTests(unittest.TestCase):

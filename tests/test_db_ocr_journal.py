@@ -104,6 +104,7 @@ class OcrmypdfBackendTests(unittest.TestCase):
             backend = OcrmypdfBackend(
                 ocrmypdf=str(fake_ocr),
                 pdftotext=str(fake_pdftotext),
+                rotate_pages_threshold=2.0,
             )
             text = backend.extract_text(source, "application/pdf")
 
@@ -115,6 +116,8 @@ class OcrmypdfBackendTests(unittest.TestCase):
                 "deu+eng",
                 "--tesseract-oem",
                 "--rotate-pages",
+                "--rotate-pages-threshold",
+                "2",
                 "--deskew",
                 "--clean",
                 "--oversample",
@@ -126,6 +129,9 @@ class OcrmypdfBackendTests(unittest.TestCase):
                 "2",
             ):
                 self.assertIn(expected, arguments)
+
+            threshold_index = arguments.index("--rotate-pages-threshold")
+            self.assertEqual(arguments[threshold_index + 1], "2")
 
 
 class JournalTests(unittest.TestCase):

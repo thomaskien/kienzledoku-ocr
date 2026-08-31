@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.00 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises.
+Version 1.1 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -15,7 +15,8 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - Vor jedem APS-Update wird `oldText` als `update_prepared` in ein append-only JSONL-Journal geschrieben und per `fsync` gesichert.
 - Nach jedem Update werden Text, Footer, `objectId`, `verweis`, `gueltigkeitszeitpunkt` und `fachinformationstyp` erneut geprüft.
 - Ein Dokumentfehler wird journalisiert; anschließend läuft der Batch mit dem nächsten Dokument weiter.
-- Bereits vorhandene Marker `kienzledoku OCR v…` verhindern Doppelanhänge.
+- Bereits vorhandene Marker `kienzledoku OCR v…` verhindern standardmäßig Doppelanhänge.
+- Version 1.1 grenzt jeden neuen OCR-Anteil mit festen BEGINN-/ENDE-Markern ab. `--reprocess` ersetzt den Block gezielt, statt ihn erneut anzuhängen.
 - Schreibvorgänge laufen bewusst nicht parallel.
 
 `classid = 59` (Bildeinträge) ist nicht freigeschaltet. Dafür muss zuerst der eigene APS-Adapter end-to-end bestätigt werden. `--limit` wird erst nach der Dateiinfo-Prüfung angewendet und zählt damit tatsächliche PDF-Kandidaten; andere `classid-60`-Dateitypen verbrauchen das Limit nicht.
@@ -50,8 +51,27 @@ Ohne zusätzliche Option wird das KienzleFax-OCRmyPDF-Backend verwendet. Seine P
 --pdftotext /usr/bin/pdftotext \
 --ocr-language deu+eng \
 --ocr-jobs 2 \
+--rotate-pages-threshold 14 \
 --tesseract-timeout 300
 ```
+
+OCRmyPDF dreht Seiten in 90°-Schritten nur, wenn die erkannte Orientierung die
+eingestellte Sicherheitsschwelle erreicht. Der Standard `14` bleibt für den
+allgemeinen Batch bewusst konservativ. Bei einem seitlich eingescannten,
+tabellarischen Dokument kann die Drehung gezielt aggressiver getestet werden:
+
+```bash
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+  --dry-run \
+  --username t2user \
+  --object-id OBJECTID_DES_DOKUMENTS \
+  --rotate-pages-threshold 2.0 \
+  --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
+  --insecure
+```
+
+Der niedrigere Wert sollte zunächst nur für das betroffene Dokument verwendet
+werden, weil er bei mehrdeutigen Seiten auch falsche Drehungen begünstigt.
 
 Die OCR-Abstraktion bleibt erhalten. Ein eigener Befehl kann ausdrücklich mit `--ocr-command` eingesetzt werden. Er wird ohne Shell gestartet; `{input}` ist verpflichtend. Liefert das Programm den Text auf stdout, genügt zum Beispiel:
 
@@ -124,15 +144,41 @@ python3 ./kienzledoku-ocr.py --apply --patient 8100 [Verbindungs- und OCR-Option
 python3 ./kienzledoku-ocr.py --apply --resume [Verbindungs- und OCR-Optionen]
 ```
 
+## Erneute OCR mit einer neuen Version
+
+`--reprocess` führt OCR bewusst auch bei bereits markierten Dokumenten erneut
+aus. Ein vollständig markierter Version-1.1-Block wird entfernt und durch genau
+einen frischen Block ersetzt. Bei älteren v1.00-Einträgen ohne Beginnmarke wird
+der ursprüngliche Text nur dann aus dem verwendeten Journal übernommen, wenn
+dessen gespeicherter SHA-256-Hash exakt dem aktuellen T2med-Text entspricht.
+Andernfalls meldet das Programm `reprocess_conflict` und schreibt nichts.
+
+Zuerst als Dry-Run über die gewünschte Menge:
+
+```bash
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+  --dry-run \
+  --reprocess \
+  --username t2user \
+  --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
+  --insecure
+```
+
+Nach fachlicher Kontrolle kann derselbe Lauf mit `--apply` wiederholt werden.
+`--reprocess` und `--resume` sind absichtlich nicht kombinierbar, weil bei der
+Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
+
 ## Textformat
 
 ```text
 <alter Text/Titel>
 
 
+----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.00, 30.08.2026 14:55
+kienzledoku OCR v1.1, 31.08.2026 14:55
+----- ENDE kienzledoku OCR -----
 ```
 
 Die Footerzeit wird immer in `Europe/Berlin` erzeugt.
@@ -141,7 +187,7 @@ Die Footerzeit wird immer in `Europe/Berlin` erzeugt.
 
 Das Journal enthält Patientennummer, Dokumentmetadaten und bei schreibenden Vorgängen den vollständigen bisherigen Text. Es enthält damit medizinische Daten, wird mit Modus `0600` angelegt und gehört in ein entsprechend geschütztes Verzeichnis.
 
-Wichtige Statuswerte sind `dry_run`, `update_prepared`, `updated`, `already_ocr`, `missing_cdn`, `unsupported_type`, `download_failed`, `ocr_failed`, `ocr_empty`, `aps_find_failed`, `aps_update_failed` und `verification_failed`.
+Wichtige Statuswerte sind `dry_run`, `update_prepared`, `updated`, `already_ocr`, `reprocess_conflict`, `missing_cdn`, `unsupported_type`, `download_failed`, `ocr_failed`, `ocr_empty`, `aps_find_failed`, `aps_update_failed` und `verification_failed`.
 
 `update_prepared` ist ein Write-ahead-Eintrag. Folgt kein `updated`, muss der konkrete Eintrag geprüft werden; ein erneuter Backfill erkennt einen eventuell dennoch geschriebenen OCR-Marker und hängt ihn nicht doppelt an.
 

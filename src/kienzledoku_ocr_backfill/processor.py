@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
 
+from . import __version__
 from .handlers.document_reference import DocumentReferenceHandler
 from .journal import Journal
 from .models import InventoryItem
@@ -42,7 +43,7 @@ class BackfillProcessor:
             if item.object_id in completed:
                 self._journal.write(
                     {
-                        "version": "1.00",
+                        "version": __version__,
                         "patientNumber": item.patient_number,
                         "objectId": item.object_id,
                         "classId": item.class_id,
@@ -60,7 +61,7 @@ class BackfillProcessor:
                 # Last-resort guard: even an implementation error is per-document.
                 self._journal.write(
                     {
-                        "version": "1.00",
+                        "version": __version__,
                         "patientNumber": item.patient_number,
                         "objectId": item.object_id,
                         "classId": item.class_id,

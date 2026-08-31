@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1 – 31.08.2026
+
+- Klare BEGINN-/ENDE-Markierung um jeden neu erzeugten OCR-Block
+- Bewusster `--reprocess`-Modus zum sicheren Ersetzen vorhandener OCR-Blöcke
+- Hash-verifizierte Übernahme des ursprünglichen Textes bei v1.00-Altdaten
+- Einstellbare OCRmyPDF-Sicherheitsschwelle für schwierige 90°-Seitendrehungen
+
 ## 1.00 – 31.08.2026
 
 - Serieller OCR-Backfill für PDF-Dokumentverweise (`classid = 60`)

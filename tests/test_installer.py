@@ -28,7 +28,7 @@ class DependencyInstallerTests(unittest.TestCase):
             ocrmypdf.write_text(
                 "#!/usr/bin/env bash\n"
                 "if [[ ${1:-} == --help ]]; then\n"
-                "  echo '--mode --rotate-pages --deskew --clean --oversample --output-type --optimize --tesseract-timeout --jobs'\n"
+                "  echo '--mode --rotate-pages --rotate-pages-threshold --deskew --clean --oversample --output-type --optimize --tesseract-timeout --jobs'\n"
                 "else\n"
                 "  echo 'ocrmypdf test'\n"
                 "fi\n",

@@ -46,6 +46,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _nonnegative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("Wert darf nicht negativ sein")
+    return parsed
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -59,6 +66,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     mode.add_argument("--apply", action="store_true", help="APS-Updates wirklich ausführen")
     parser.add_argument("--limit", type=_positive_int, help="Höchstens N Inventareinträge verarbeiten")
     parser.add_argument("--resume", action="store_true", help="Erfolgreiche objectIds aus dem Journal überspringen")
+    parser.add_argument(
+        "--reprocess",
+        action="store_true",
+        help=(
+            "Vorhandenen KienzleDoku-OCR-Block sicher ersetzen und OCR erneut ausführen; "
+            "nicht mit --resume kombinierbar"
+        ),
+    )
     parser.add_argument(
         "--rollback",
         action="store_true",
@@ -108,6 +123,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--pdftotext", default="pdftotext", help="pdftotext-Programm oder absoluter Pfad")
     parser.add_argument("--ocr-language", default="deu+eng", help="Tesseract-Sprachen; Standard deu+eng")
     parser.add_argument("--ocr-jobs", type=_positive_int, default=2, help="Interne OCRmyPDF-Jobs; Standard 2")
+    parser.add_argument(
+        "--rotate-pages-threshold",
+        type=_nonnegative_float,
+        default=14.0,
+        help=(
+            "Sicherheitsschwelle für automatische 90°-Seitendrehung; Standard 14. "
+            "Für schwierige Tabellen gezielt 2.0 testen."
+        ),
+    )
     parser.add_argument(
         "--tesseract-timeout",
         type=float,
@@ -166,6 +190,10 @@ def run(args: argparse.Namespace) -> int:
     database = DatabaseReader(config)
     if args.rollback and args.resume:
         raise BackfillError("--rollback und --resume können nicht kombiniert werden")
+    if args.reprocess and args.resume:
+        raise BackfillError("--reprocess und --resume können nicht kombiniert werden")
+    if args.reprocess and args.rollback:
+        raise BackfillError("--reprocess und --rollback können nicht kombiniert werden")
 
     inventory = []
     ocr = None
@@ -192,6 +220,7 @@ def run(args: argparse.Namespace) -> int:
                     jobs=args.ocr_jobs,
                     timeout=args.ocr_timeout,
                     tesseract_timeout=args.tesseract_timeout,
+                    rotate_pages_threshold=args.rotate_pages_threshold,
                 )
         except ValueError as exc:
             raise BackfillError(str(exc)) from exc
@@ -236,6 +265,7 @@ def run(args: argparse.Namespace) -> int:
                 ocr,
                 journal,
                 report=print,
+                reprocess_existing=args.reprocess,
             )
             summary = BackfillProcessor(handler, journal).run(
                 inventory,
@@ -253,6 +283,7 @@ def run(args: argparse.Namespace) -> int:
         "aps_find_failed",
         "aps_update_failed",
         "verification_failed",
+        "reprocess_conflict",
         "internal_error",
         "rollback_conflict",
         "rollback_failed",

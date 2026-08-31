@@ -68,6 +68,7 @@ verify_dependencies() {
     fi
     for required_option in \
       --rotate-pages \
+      --rotate-pages-threshold \
       --deskew \
       --clean \
       --oversample \

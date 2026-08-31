@@ -1,3 +1,3 @@
 """KienzleDoku OCR backfill."""
 
-__version__ = "1.00"
+__version__ = "1.1"

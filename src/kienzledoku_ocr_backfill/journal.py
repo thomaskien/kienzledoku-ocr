@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 
@@ -20,6 +20,7 @@ class Journal:
         self.path = path
         self._handle = None
         self._lock_handle = None
+        self._verified_previous_texts: Optional[dict[tuple[str, str], str]] = None
 
     def __enter__(self) -> "Journal":
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -61,6 +62,21 @@ class Journal:
         self._handle.write("\n")
         self._handle.flush()
         os.fsync(self._handle.fileno())
+        if self._verified_previous_texts is not None:
+            self._cache_verified_previous_text(enriched)
+
+    def _cache_verified_previous_text(self, record: dict[str, Any]) -> None:
+        object_id = record.get("objectId")
+        text_hash = record.get("newTextSha256")
+        old_text = record.get("oldText")
+        if (
+            record.get("status") == "updated"
+            and object_id
+            and isinstance(text_hash, str)
+            and isinstance(old_text, str)
+        ):
+            assert self._verified_previous_texts is not None
+            self._verified_previous_texts[(str(object_id), text_hash)] = old_text
 
     def records(self) -> Iterable[dict[str, Any]]:
         if not self.path.exists():
@@ -105,3 +121,13 @@ class Journal:
             elif record.get("status") == "rolled_back":
                 candidates.pop(object_id, None)
         return list(candidates.values())
+
+    def verified_previous_text(
+        self, object_id: str, current_text_sha256: str
+    ) -> Optional[str]:
+        """Recover legacy pre-OCR text only from an exact verified update hash."""
+        if self._verified_previous_texts is None:
+            self._verified_previous_texts = {}
+            for record in self.records():
+                self._cache_verified_previous_text(record)
+        return self._verified_previous_texts.get((object_id, current_text_sha256))

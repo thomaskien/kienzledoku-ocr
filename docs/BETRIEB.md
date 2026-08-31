@@ -34,6 +34,15 @@ Die Sprachliste muss mindestens `deu` und `eng` enthalten. Die Produktionspipeli
 
 Der Installer aktualisiert nur die APT-Paketlisten und installiert die benötigten Pakete. Er führt bewusst kein `apt-get upgrade` aus.
 
+### Seitlich eingescannte Tabellen
+
+Die automatische 90°-Drehung verwendet standardmäßig die konservative
+OCRmyPDF-Sicherheitsschwelle `14`. Erkennt OCRmyPDF die Orientierung eines
+tabellarischen Medikationsplans damit nicht sicher genug, wird nur dieses
+Dokument zunächst im Dry-Run mit `--rotate-pages-threshold 2.0` getestet. Der
+niedrigere Wert darf nicht ungeprüft auf den Gesamtlauf übertragen werden, da
+er bei mehrdeutigen Seiten falsche Drehungen wahrscheinlicher macht.
+
 ## 3. Testobjekt `test5.pdf`
 
 Bestätigte Daten:
@@ -52,7 +61,31 @@ Reihenfolge:
 5. Journal muss zunächst `update_prepared` und danach `updated` mit höherer `revisionAfter` enthalten.
 6. Denselben Befehl erneut ausführen; erwartet wird `already_ocr` ohne CDN-Download oder APS-Update.
 
-## 4. Stufenweise Freigabe
+## 4. Vorhandene OCR-Blöcke neu erzeugen
+
+Ab Version 1.1 umschließen feste BEGINN-/ENDE-Zeilen den vollständigen
+KienzleDoku-OCR-Block. Mit `--reprocess` wird dieser Block entfernt und nach
+erneuter OCR einmal frisch angehängt. Der ursprüngliche Titel beziehungsweise
+Text bleibt erhalten.
+
+Für v1.00-Blöcke ohne Beginnmarke muss dasselbe Journal verfügbar sein, das den
+damaligen verifizierten `updated`-Eintrag enthält. Nur bei exakt passendem
+`newTextSha256` wird dessen `oldText` als Basis verwendet. Fehlt dieser sichere
+Nachweis, endet das Dokument mit `reprocess_conflict` und bleibt unverändert.
+
+```bash
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+  --dry-run \
+  --reprocess \
+  --username t2user \
+  --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
+  --insecure
+```
+
+Erst nach Kontrolle wird `--dry-run` durch `--apply` ersetzt. Für einen
+vollständigen Neu-Lauf darf `--resume` nicht gesetzt werden.
+
+## 5. Stufenweise Freigabe
 
 Nach erfolgreichem Einzeltest:
 
@@ -64,7 +97,7 @@ Nach erfolgreichem Einzeltest:
 
 Es gibt keine parallelen APS-Schreibvorgänge. Geschwindigkeit darf erst nach vollständigem fachlichem Abnahmetest optimiert werden.
 
-## 5. Fehlerauswertung
+## 6. Fehlerauswertung
 
 - `missing_cdn`: Verweiseintrag bleibt unverändert; typischer Kandidat nach Migration.
 - `unsupported_type`: Kein freigegebener PDF-Dokumentverweis.
@@ -74,9 +107,10 @@ Es gibt keine parallelen APS-Schreibvorgänge. Geschwindigkeit darf erst nach vo
 - `aps_find_failed`: Aktuelles vollständiges DTO konnte nicht sicher gelesen werden.
 - `aps_update_failed`: APS bestätigte das Update nicht. Wegen möglicher unklarer Netzwerkantwort T2med-Eintrag und nachfolgenden Marker prüfen.
 - `verification_failed`: Update wurde angestoßen, aber die Nachprüfung war nicht vollständig erfolgreich. Diesen Fall vor Fortsetzung fachlich prüfen.
+- `reprocess_conflict`: Ein alter OCR-Block konnte nicht eindeutig und hash-verifiziert vom ursprünglichen Text getrennt werden; es wurde nichts geschrieben.
 
 Ein Exitcode `2` bedeutet, dass der Batch alle erreichbaren Dokumente durchlaufen hat, aber mindestens ein solcher Status vorliegt.
 
-## 6. Datenschutz
+## 7. Datenschutz
 
 Originaldateien werden nur in einem automatisch entfernten temporären Verzeichnis mit restriktiven Dateirechten abgelegt. Das JSONL-Journal enthält dagegen dauerhaft `oldText` und weitere Patientenbezüge. Es darf nicht per E-Mail versandt, in Git aufgenommen oder unverschlüsselt auf fremde Systeme kopiert werden.

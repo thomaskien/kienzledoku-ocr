@@ -8,12 +8,29 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 
-MARKER_RE = re.compile(r"(?m)^kienzledoku OCR v[0-9.]+,\s")
+BLOCK_BEGIN = "----- BEGINN kienzledoku OCR -----"
+BLOCK_END = "----- ENDE kienzledoku OCR -----"
+MARKER_RE = re.compile(
+    rf"(?m)^(?:kienzledoku OCR v[0-9.]+,\s|{re.escape(BLOCK_BEGIN)}$)"
+)
+BLOCK_RE = re.compile(
+    rf"(?s)(?:^|\n{{3}}){re.escape(BLOCK_BEGIN)}\n.*?\n\n"
+    rf"kienzledoku OCR v[0-9.]+,\s[^\r\n]+\n{re.escape(BLOCK_END)}\s*\Z"
+)
 BERLIN = ZoneInfo("Europe/Berlin")
 
 
 def contains_ocr_marker(text: Optional[str]) -> bool:
     return bool(MARKER_RE.search(text or ""))
+
+
+def remove_managed_ocr_block(text: Optional[str]) -> Optional[str]:
+    """Return the preserved prefix only for a complete, terminal managed block."""
+    value = text or ""
+    match = BLOCK_RE.search(value)
+    if match is None:
+        return None
+    return value[: match.start()].rstrip()
 
 
 def make_footer(version: str, when: Optional[datetime] = None) -> str:
@@ -26,11 +43,15 @@ def make_footer(version: str, when: Optional[datetime] = None) -> str:
 
 
 def compose_text(old_text: Optional[str], ocr_text: str, footer: str) -> str:
-    """Compose exactly as specified: two empty lines before OCR."""
+    """Append one complete managed OCR block after two empty lines."""
     return (
         (old_text or "").rstrip()
         + "\n\n\n"
+        + BLOCK_BEGIN
+        + "\n"
         + ocr_text.strip()
         + "\n\n"
         + footer
+        + "\n"
+        + BLOCK_END
     )
