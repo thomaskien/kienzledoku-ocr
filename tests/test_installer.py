@@ -77,8 +77,22 @@ class DependencyInstallerTests(unittest.TestCase):
             )
             qpdf.chmod(0o755)
 
+            amdb_client = bin_dir / "mariadb"
+            amdb_client.write_text(
+                "#!/usr/bin/env bash\necho 'mariadb test'\n",
+                encoding="utf-8",
+            )
+            amdb_client.chmod(0o755)
+            amdb_config = bin_dir / "service.conf"
+            amdb_config.write_text("dball.dbschema=mmidata1\n", encoding="utf-8")
+            amdb_socket = bin_dir / "t2med-mariadb"
+            amdb_socket.touch()
+
             environment = dict(os.environ)
             environment["PATH"] = f"{bin_dir}:/usr/bin:/bin"
+            environment["T2MED_AMDB_CLIENT"] = str(amdb_client)
+            environment["T2MED_AMDB_CONFIG"] = str(amdb_config)
+            environment["T2MED_AMDB_SOCKET"] = str(amdb_socket)
             result = subprocess.run(
                 ["bash", str(INSTALLER), "--check"],
                 capture_output=True,
@@ -87,6 +101,7 @@ class DependencyInstallerTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("OCR-Abhängigkeiten sind vollständig", result.stdout)
+            self.assertIn("Aktives T2med-AMDB-Schema: mmidata1", result.stdout)
 
     def test_required_packages_are_explicit(self):
         text = INSTALLER.read_text(encoding="utf-8")

@@ -87,6 +87,37 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(args.force_rotate_page, [(1, "+90"), (3, "-90")])
 
+    def test_t2med_amdb_defaults_and_overrides_are_parsed(self):
+        defaults = parse_args([])
+        self.assertEqual(
+            defaults.amdb_config,
+            Path("/opt/t2med/server/mmi/service.conf"),
+        )
+        self.assertEqual(
+            defaults.amdb_client,
+            Path("/opt/t2med/server/mariadb/bin/mariadb"),
+        )
+        self.assertEqual(
+            defaults.amdb_socket,
+            Path("/var/opt/t2med/data/mariadb/t2med-mariadb"),
+        )
+        custom = parse_args(
+            [
+                "--amdb-config",
+                "/tmp/service.conf",
+                "--amdb-client",
+                "/tmp/mariadb",
+                "--amdb-socket",
+                "/tmp/socket",
+                "--amdb-timeout",
+                "12.5",
+            ]
+        )
+        self.assertEqual(custom.amdb_config, Path("/tmp/service.conf"))
+        self.assertEqual(custom.amdb_client, Path("/tmp/mariadb"))
+        self.assertEqual(custom.amdb_socket, Path("/tmp/socket"))
+        self.assertEqual(custom.amdb_timeout, 12.5)
+
 
 class OcrmypdfBackendTests(unittest.TestCase):
     def test_matches_confirmed_kienzlefax_pipeline_and_extracts_full_text(self):

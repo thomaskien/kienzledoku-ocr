@@ -6,9 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .bfarm_pzn import PZNResolver
 from .bmp import BmpParseError, format_bmp, parse_bmp
 from .qr_extractor import extract_qr_codes
+from .t2med_amdb import (
+    DEFAULT_CLIENT,
+    DEFAULT_CONFIG,
+    DEFAULT_SOCKET,
+    T2medAmdbResolver,
+)
 
 
 @dataclass(frozen=True)
@@ -22,14 +27,20 @@ class MedicationPlanScanner:
     def __init__(
         self,
         *,
-        pzn_database: Optional[Path],
+        amdb_config: Path = DEFAULT_CONFIG,
+        amdb_client: Path = DEFAULT_CLIENT,
+        amdb_socket: Path = DEFAULT_SOCKET,
+        amdb_timeout: float = 30.0,
         pdftoppm: str = "pdftoppm",
         dpi: int = 300,
         retry_dpi: int = 600,
         timeout: float = 300.0,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
-        self._pzn_database = pzn_database
+        self._amdb_config = amdb_config
+        self._amdb_client = amdb_client
+        self._amdb_socket = amdb_socket
+        self._amdb_timeout = amdb_timeout
         self._pdftoppm = pdftoppm
         self._dpi = dpi
         self._retry_dpi = retry_dpi
@@ -50,55 +61,83 @@ class MedicationPlanScanner:
             "pagesScanned": extracted.pages_scanned,
             "errors": list(extracted.errors),
             "plans": [],
-            "pznDatabase": str(self._pzn_database) if self._pzn_database else None,
-            "pznDatabaseAvailable": False,
-            "pznDatabaseRelease": None,
+            "amdbConfig": str(self._amdb_config),
+            "amdbClient": str(self._amdb_client),
+            "amdbSocket": str(self._amdb_socket),
+            "amdbAvailable": False,
+            "amdbSchema": None,
+            "amdbServerVersion": None,
         }
-        resolver: Optional[PZNResolver] = None
-        if self._pzn_database and self._pzn_database.is_file():
+        parsed_plans: list[tuple[Any, Any]] = []
+        for code in extracted.codes:
             try:
-                resolver = PZNResolver(self._pzn_database)
+                plan = parse_bmp(code.data)
+            except BmpParseError as exc:
+                diagnostics["errors"].append(
+                    {"page": code.page, "stage": "bmp_parse", "error": str(exc)}
+                )
+                self._progress(
+                    f"Medikationsplan-Code auf Seite {code.page} ist ungültig: {exc}"
+                )
+                continue
+            if plan is not None:
+                parsed_plans.append((code, plan))
+
+        resolver: Optional[T2medAmdbResolver] = None
+        if parsed_plans:
+            try:
+                resolver = T2medAmdbResolver(
+                    config_path=self._amdb_config,
+                    client_path=self._amdb_client,
+                    socket_path=self._amdb_socket,
+                    timeout=self._amdb_timeout,
+                    progress=self._progress,
+                )
                 metadata = resolver.metadata()
-                diagnostics["pznDatabaseAvailable"] = True
-                diagnostics["pznDatabaseRelease"] = metadata.get("release_date")
+                diagnostics["amdbAvailable"] = True
+                diagnostics["amdbSchema"] = metadata.get("schema")
+                diagnostics["amdbServerVersion"] = metadata.get("serverVersion")
             except Exception as exc:
                 diagnostics["errors"].append(
-                    {"page": None, "stage": "pzn_database", "error": str(exc)[:1000]}
+                    {"page": None, "stage": "t2med_amdb", "error": str(exc)[:1000]}
                 )
+                self._progress(f"T2med-Arzneimitteldatenbank nicht verfügbar: {exc}")
                 if resolver is not None:
                     resolver.close()
                 resolver = None
 
         pages: dict[int, list[str]] = {}
         try:
-            for code in extracted.codes:
+            for code, plan in parsed_plans:
                 try:
-                    plan = parse_bmp(code.data)
-                except BmpParseError as exc:
+                    formatted = format_bmp(plan, resolver)
+                except Exception as exc:
                     diagnostics["errors"].append(
-                        {"page": code.page, "stage": "bmp_parse", "error": str(exc)}
+                        {
+                            "page": code.page,
+                            "stage": "t2med_amdb_lookup",
+                            "error": str(exc)[:1000],
+                        }
                     )
                     self._progress(
-                        f"Medikationsplan-Code auf Seite {code.page} ist ungültig: {exc}"
+                        f"T2med-AMDB-Abfrage für Medikationsplan auf Seite "
+                        f"{code.page} fehlgeschlagen; daher normale OCR: {exc}"
                     )
                     continue
-                if plan is None:
-                    continue
-                formatted = format_bmp(plan, resolver)
                 if resolver is None and formatted.pzns:
                     diagnostics["errors"].append(
                         {
                             "page": code.page,
-                            "stage": "pzn_database",
+                            "stage": "t2med_amdb",
                             "error": (
-                                "Medikationsplan erkannt, aber PZN-Datenbank ist nicht "
+                                "Medikationsplan erkannt, aber T2med-AMDB ist nicht "
                                 "verfügbar; Seite bleibt in der normalen OCR"
                             ),
                         }
                     )
                     self._progress(
                         f"Medikationsplan erkannt: Seite {code.page}; "
-                        "PZN-Datenbank fehlt, daher normale OCR"
+                        "T2med-AMDB nicht verfügbar, daher normale OCR"
                     )
                     continue
                 pages.setdefault(code.page, []).append(formatted.text)

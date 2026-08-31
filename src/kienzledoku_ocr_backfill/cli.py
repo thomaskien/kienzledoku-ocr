@@ -54,6 +54,13 @@ def _nonnegative_float(value: str) -> float:
     return parsed
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("Wert muss größer als 0 sein")
+    return parsed
+
+
 def _forced_page_rotation(value: str) -> tuple[int, str]:
     match = re.fullmatch(r"([1-9][0-9]*):([+-](?:90|180|270))", value.strip())
     if match is None:
@@ -170,13 +177,31 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Mindestkonfidenz für direkte Tesseract-OSD-Drehung; Standard 5",
     )
     parser.add_argument(
-        "--pzn-db",
+        "--amdb-config",
         type=Path,
-        default=Path("/var/lib/kienzledoku-ocr/bfarm_pzn.sqlite"),
+        default=Path("/opt/t2med/server/mmi/service.conf"),
         help=(
-            "Lokale BfArM-PZN-Datenbank für Medikationspläne; Standard "
-            "/var/lib/kienzledoku-ocr/bfarm_pzn.sqlite"
+            "T2med-MMI-service.conf mit aktivem AMDB-Schema; Standard "
+            "/opt/t2med/server/mmi/service.conf"
         ),
+    )
+    parser.add_argument(
+        "--amdb-client",
+        type=Path,
+        default=Path("/opt/t2med/server/mariadb/bin/mariadb"),
+        help="T2med-MariaDB-Client für ausschließlich lesende PZN-Abfragen",
+    )
+    parser.add_argument(
+        "--amdb-socket",
+        type=Path,
+        default=Path("/var/opt/t2med/data/mariadb/t2med-mariadb"),
+        help="Lokaler T2med-MariaDB-Socket",
+    )
+    parser.add_argument(
+        "--amdb-timeout",
+        type=_positive_float,
+        default=30.0,
+        help="Zeitlimit je lokaler T2med-AMDB-Abfrage; Standard 30 Sekunden",
     )
     parser.add_argument(
         "--no-medication-plan-codes",
@@ -297,7 +322,10 @@ def run(args: argparse.Namespace) -> int:
                     auto_orient_pages=args.auto_orient_pages,
                     orientation_min_confidence=args.orientation_confidence,
                     medication_plan_codes=args.medication_plan_codes,
-                    pzn_database=args.pzn_db,
+                    amdb_config=args.amdb_config,
+                    amdb_client=args.amdb_client,
+                    amdb_socket=args.amdb_socket,
+                    amdb_timeout=args.amdb_timeout,
                     barcode_dpi=args.barcode_dpi,
                     barcode_retry_dpi=args.barcode_retry_dpi,
                     progress=print,

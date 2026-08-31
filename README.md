@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.4.1 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
+Version 1.5 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -18,7 +18,7 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - Bereits vorhandene Marker `kienzledoku OCR v…` verhindern standardmäßig Doppelanhänge.
 - Version 1.1 grenzt jeden neuen OCR-Anteil mit festen BEGINN-/ENDE-Markern ab. `--reprocess` ersetzt den Block gezielt, statt ihn erneut anzuhängen.
 - Seit Version 1.3 wird die Orientierung jeder PDF-Seite vor OCR geprüft; nur eine temporäre Arbeitskopie wird gedreht und die Entscheidung journalisiert.
-- Version 1.4 liest BMP-Data-Matrix und PZN-Daten ausschließlich lokal; die Data-Matrix-Rohdaten werden nicht in das Journal geschrieben.
+- Version 1.5 liest BMP-Data-Matrix und PZN-Daten ausschließlich lokal aus der aktiven T2med-AMDB; die Data-Matrix-Rohdaten werden nicht in das Journal geschrieben.
 - Schreibvorgänge laufen bewusst nicht parallel.
 
 `classid = 59` (Bildeinträge) ist nicht freigeschaltet. Dafür muss zuerst der eigene APS-Adapter end-to-end bestätigt werden. `--limit` wird erst nach der Dateiinfo-Prüfung angewendet und zählt damit tatsächliche PDF-Kandidaten; andere `classid-60`-Dateitypen verbrauchen das Limit nicht.
@@ -30,6 +30,8 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - T2med-Benutzer für APS und CDN
 - `ocrmypdf`, Tesseract mit `deu`/`eng`/`osd`, `pdftotext`, `pdftoppm`, Ghostscript, qpdf und unpaper
 - Pillow und ZXing-C++ (`python3-pil`, `python3-zxing-cpp`) für Data Matrix
+- lokaler, ausschließlich lesender Zugriff auf T2meds MariaDB-AMDB über den
+  mitgelieferten Client und Socket
 
 Das Standardbackend entspricht der bestätigten KienzleFax-Pipeline: OCRmyPDF/Tesseract mit `deu+eng`, OEM 1, Seitendrehung, Entzerrung, Reinigung, 300-dpi-Oversampling, PDF/A-3, Optimierung 1, 300 Sekunden Tesseract-Zeitlimit je Seite und zwei internen Jobs. Davor prüft Version 1.3 jede Seite mit Tesseract OSD. Ist die Lage nicht eindeutig, werden 0°, 90°, 180° und 270° anhand eines kurzen OCR-Laufs verglichen. Nur eine ausreichend deutliche Entscheidung wird auf die temporäre Arbeitskopie angewandt. Seiten ohne Textschicht werden durch Tesseract erkannt; bei Seiten mit vorhandenem PDF-Text bleibt dieser erhalten und wird nicht unnötig erneut OCR-erkannt. Anschließend liest `pdftotext` den vorhandenen und den neu erkannten Text gemeinsam und ohne Steuerzeichen für Seitenumbrüche aus dem temporären OCR-PDF. Diese Arbeitsdateien werden verworfen; die T2med-CDN-Datei wird nicht verändert.
 
@@ -39,50 +41,56 @@ Auf Debian/Raspberry Pi OS werden dieselben Pakete wie bei KienzleFax benötigt:
 sudo ./scripts/install-ocr-dependencies.sh
 ```
 
-Der Installer verwendet ausschließlich `apt-get`, führt kein Distributions-Upgrade aus und prüft danach Programme, OCRmyPDF-Optionen, Pillow/ZXing-C++ sowie die Tesseract-Sprachen `deu`, `eng` und `osd`. Eine rein lesende Prüfung ist ebenfalls möglich:
+Der Installer verwendet ausschließlich `apt-get`, führt kein Distributions-Upgrade aus und prüft danach Programme, OCRmyPDF-Optionen, Pillow/ZXing-C++, die Tesseract-Sprachen `deu`, `eng` und `osd` sowie den vorhandenen lokalen T2med-AMDB-Zugang. Eine rein lesende Prüfung ist ebenfalls möglich:
 
 ```bash
 ./scripts/install-ocr-dependencies.sh --check
 ```
 
-## Bundesmedikationsplan und PZN-Datenbank
+## Bundesmedikationsplan und lokale T2med-AMDB
 
 Der bundeseinheitliche Medikationsplan enthält eine Data Matrix. Version 1.4
 liest deren BMP-XML ohne OCR und ersetzt nur diese PDF-Seite durch einen klar
 markierten, menschenlesbaren Text. Andere Seiten desselben Dokuments durchlaufen
 unverändert die normale OCR. Arzneimittelnamen, Wirkstoffe und Stärken werden
-anhand der PZN aus einer lokalen BfArM-§31b-SQLite-Datenbank ergänzt.
+anhand der PZN direkt aus `MEDPLAN_PACKAGE` des aktiven lokalen T2med-AMDB-Schemas
+ergänzt. Version 1.5 liest den Schemanamen bei jedem Programmstart aus
+`/opt/t2med/server/mmi/service.conf`; ein Wechsel zwischen `mmidata1` und
+`mmidata2` wird dadurch automatisch berücksichtigt.
 
-Das BfArM veröffentlicht die vollständigen Referenzdaten nicht als frei
-ermittelbare DSV-Links. Nach Auskunft auf der offiziellen Referenzdatenbank-Seite
-wird die ZIP-Lieferung nach Kontaktaufnahme über `Referenzdaten@bfarm.de`
-bereitgestellt. Das Archiv `bfarm_pzn_resolver_*.zip` ist nur der Programmcode
-und keine solche Datenlieferung.
-
-Die erhaltene BfArM-ZIP-Datei vor dem ersten Lauf und später nach Bedarf direkt
-importieren:
+Vor dem ersten OCR-Lauf lässt sich der ausschließlich lesende Zugriff prüfen:
 
 ```bash
-python3 ./bfarm-pzn.py update \
-  --source-zip /pfad/zur/BfArM-Lieferung.zip \
-  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
-
-python3 ./bfarm-pzn.py info \
-  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
+python3 ./t2med-amdb.py info
 ```
 
-Eine einzelne PZN lässt sich kontrollieren:
+Die beiden bestätigten Test-PZN lassen sich gemeinsam kontrollieren:
 
 ```bash
-python3 ./bfarm-pzn.py lookup 09322739 \
-  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
+python3 ./t2med-amdb.py lookup 09322739 09531845
 ```
 
-Fehlt die Datenbank bei einem PZN-basierten Plan, meldet das Programm dies und
-lässt die Seite sicher in der normalen OCR. Der Pfad ist mit `--pzn-db`
-einstellbar. Die Erkennung arbeitet standardmäßig mit 300 dpi und versucht eine
-nicht erkannte Seite erneut mit 600 dpi (`--barcode-dpi` und
-`--barcode-retry-dpi`). `--no-medication-plan-codes` deaktiviert diese Funktion.
+Während der Dokumentverarbeitung ist die Abfrage ausdrücklich sichtbar, zum
+Beispiel:
+
+```text
+T2med-Arzneimitteldatenbank wird abgefragt: Schema mmidata1
+T2med-Arzneimitteldatenbank verbunden: Schema mmidata1, MariaDB 11.4.5-MariaDB
+T2med-AMDB: PZN 09322739 wird abgefragt
+T2med-AMDB: PZN 09322739: Tamsulosin - 1 A Pharma 0,4 mg Retardtabletten | Wirkstoff Tamsulosin | Stärke 0,4 mg | Form RetTabl
+T2med-AMDB: PZN 09531845 wird abgefragt
+T2med-AMDB: PZN 09531845: Candesartan AAA 32 mg Tabletten | Wirkstoff Candesartancilexetil | Stärke 32 mg | Form Tabl
+```
+
+Jede SQL-Ausführung wird als `START TRANSACTION READ ONLY` gekapselt; der
+Resolver erzeugt ausschließlich `SELECT` und greift nie direkt auf `.ibd`- oder
+`.frm`-Dateien zu. Die Pfade können nötigenfalls mit `--amdb-config`,
+`--amdb-client` und `--amdb-socket` angepasst werden. Ist die T2med-AMDB nicht
+erreichbar oder schlägt eine PZN-Abfrage fehl, meldet das Programm dies und lässt
+die betroffene Seite sicher in der normalen OCR. Die Data-Matrix-Erkennung
+arbeitet standardmäßig mit 300 dpi und versucht eine nicht erkannte Seite erneut
+mit 600 dpi (`--barcode-dpi` und `--barcode-retry-dpi`).
+`--no-medication-plan-codes` deaktiviert diese Funktion.
 
 Der unabhängige, fachlich neutrale Extraktor unterstützt PDF, PNG, JPEG und
 mehrseitiges TIFF. Er gibt Rohdaten, UTF-8-Text soweit möglich, Base64, Seite und
@@ -252,7 +260,7 @@ Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
 ----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.4.1, 31.08.2026 14:55
+kienzledoku OCR v1.5, 31.08.2026 14:55
 ----- ENDE kienzledoku OCR -----
 ```
 
@@ -308,8 +316,9 @@ Zurückgesetzt werden ausschließlich zuvor vollständig verifizierte `updated`-
 - `2`: Batch beendet, mindestens ein Dokument hatte einen Fehler oder Rollback-Konflikt
 - `130`: interaktiv abgebrochen
 
-Die Neuerungen für Data Matrix und Medikationspläne beschreibt
-[docs/VERSION-1.4.md](docs/VERSION-1.4.md). Die Fortschrittsausgabe und
+Die lokale T2med-AMDB-Anbindung beschreibt
+[docs/VERSION-1.5.md](docs/VERSION-1.5.md). Die Neuerungen für Data Matrix und
+Medikationspläne beschreibt [docs/VERSION-1.4.md](docs/VERSION-1.4.md). Die Fortschrittsausgabe und
 Orientierungsentscheidung steht in [docs/VERSION-1.3.md](docs/VERSION-1.3.md).
 Weitere praktische Prüfschritte
 stehen in [docs/BETRIEB.md](docs/BETRIEB.md).

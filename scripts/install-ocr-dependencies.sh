@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.4.1"
+VERSION="1.5"
 
 readonly PACKAGES=(
   python3
@@ -28,7 +28,8 @@ Verwendung:
   ./scripts/install-ocr-dependencies.sh --help
 
 Ohne Option werden OCRmyPDF/Tesseract sowie die Data-Matrix-Abhängigkeiten
-über apt-get installiert. --check verändert das System nicht.
+über apt-get installiert. Die bereits mit T2med ausgelieferten AMDB-Zugänge
+werden geprüft, aber nicht verändert. --check verändert das System nicht.
 EOF
 }
 
@@ -38,6 +39,10 @@ verify_dependencies() {
   local languages=""
   local help_text=""
   local required_option
+  local amdb_client="${T2MED_AMDB_CLIENT:-/opt/t2med/server/mariadb/bin/mariadb}"
+  local amdb_config="${T2MED_AMDB_CONFIG:-/opt/t2med/server/mmi/service.conf}"
+  local amdb_socket="${T2MED_AMDB_SOCKET:-/var/opt/t2med/data/mariadb/t2med-mariadb}"
+  local amdb_schema=""
 
   echo "Prüfe OCR-Programme ..."
   for command_name in python3 ocrmypdf tesseract pdftotext pdftoppm gs qpdf unpaper; do
@@ -107,6 +112,32 @@ verify_dependencies() {
       echo "  [FEHLT] qpdf unterstützt --rotate/--flatten-rotation nicht" >&2
       failed=1
     fi
+  fi
+
+  echo "Prüfe lokalen T2med-AMDB-Zugang (nur lesende Nutzung) ..."
+  if [[ -x "$amdb_client" ]]; then
+    printf '  [OK] T2med-MariaDB-Client: %s\n' "$amdb_client"
+  else
+    printf '  [FEHLT] T2med-MariaDB-Client: %s\n' "$amdb_client" >&2
+    failed=1
+  fi
+  if [[ -r "$amdb_config" ]]; then
+    amdb_schema="$(sed -n 's/^[[:space:]]*dball\.dbschema[[:space:]]*=[[:space:]]*//p' "$amdb_config" | tail -1)"
+    if [[ "$amdb_schema" =~ ^[A-Za-z0-9_]+$ ]]; then
+      printf '  [OK] Aktives T2med-AMDB-Schema: %s (%s)\n' "$amdb_schema" "$amdb_config"
+    else
+      printf '  [FEHLT] Gültiges dball.dbschema in %s\n' "$amdb_config" >&2
+      failed=1
+    fi
+  else
+    printf '  [FEHLT] T2med-MMI-Konfiguration: %s\n' "$amdb_config" >&2
+    failed=1
+  fi
+  if [[ -e "$amdb_socket" ]]; then
+    printf '  [OK] T2med-MariaDB-Socket: %s\n' "$amdb_socket"
+  else
+    printf '  [FEHLT] T2med-MariaDB-Socket: %s\n' "$amdb_socket" >&2
+    failed=1
   fi
 
   if (( failed != 0 )); then

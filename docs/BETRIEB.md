@@ -37,24 +37,28 @@ Die Sprachliste muss mindestens `deu`, `eng` und `osd` enthalten. Die Produktion
 
 Der Installer aktualisiert nur die APT-Paketlisten und installiert die benötigten Pakete. Er führt bewusst kein `apt-get upgrade` aus.
 
-### PZN-Datenbank vorbereiten
+### Lokale T2med-Arzneimitteldatenbank prüfen
 
-Die vollständige Referenzdatenbank-Lieferung beim BfArM über
-`Referenzdaten@bfarm.de` beziehen. Das gelieferte ZIP anschließend direkt
-importieren und danach die Metadaten lesen:
+Version 1.5 benötigt keinen separaten Download und keine kopierten
+MariaDB-Dateien. Sie liest `dball.dbschema` aus
+`/opt/t2med/server/mmi/service.conf` und fragt `MEDPLAN_PACKAGE` ausschließlich
+über den lokalen T2med-MariaDB-Socket ab. Vor dem ersten Lauf prüfen:
 
 ```bash
-python3 ./bfarm-pzn.py update \
-  --source-zip /pfad/zur/BfArM-Lieferung.zip \
-  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
-
-python3 ./bfarm-pzn.py info \
-  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
+python3 ./t2med-amdb.py info
+python3 ./t2med-amdb.py lookup 09322739 09531845
 ```
 
-Das Update ersetzt die SQLite-Datei erst nach vollständigem Import atomar. Die
-OCR-Pipeline greift ausschließlich lesend darauf zu. Ein Datenbank-Update nicht
-parallel zu einem OCR-Lauf starten.
+Erwartet werden das aktive Schema (`mmidata1` oder `mmidata2`), die
+MariaDB-Version und je PZN Name, Wirkstoff, Stärke und Darreichungsform. Die
+Abfrage wird als `START TRANSACTION READ ONLY` ausgeführt und enthält nur
+`SELECT`. Die laufenden `.ibd`-/`.frm`-Dateien dürfen weder kopiert noch
+bearbeitet werden.
+
+Auch der normale OCR-Lauf meldet den Datenbankzugriff sichtbar und gibt für jede
+PZN eine eigene Ergebniszeile aus. Fehlt die Datenbankverbindung oder scheitert
+eine Einzelabfrage, bleibt die betreffende Seite in der normalen OCR; ein Fehler
+darf den übrigen Batch nicht abbrechen.
 
 ### Seitlich eingescannte Tabellen
 

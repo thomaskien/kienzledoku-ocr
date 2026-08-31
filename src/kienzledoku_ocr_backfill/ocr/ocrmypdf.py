@@ -106,7 +106,10 @@ class OcrmypdfBackend(OcrBackend):
         auto_orient_pages: bool = True,
         orientation_min_confidence: float = 5.0,
         medication_plan_codes: bool = True,
-        pzn_database: Optional[Path] = None,
+        amdb_config: Path = Path("/opt/t2med/server/mmi/service.conf"),
+        amdb_client: Path = Path("/opt/t2med/server/mariadb/bin/mariadb"),
+        amdb_socket: Path = Path("/var/opt/t2med/data/mariadb/t2med-mariadb"),
+        amdb_timeout: float = 30.0,
         barcode_dpi: int = 300,
         barcode_retry_dpi: int = 600,
         progress: Optional[Callable[[str], None]] = None,
@@ -123,6 +126,8 @@ class OcrmypdfBackend(OcrBackend):
             raise ValueError("Orientierungsschwelle darf nicht negativ sein")
         if barcode_dpi < 72 or barcode_retry_dpi < barcode_dpi:
             raise ValueError("Ungültige Data-Matrix-Renderauflösung")
+        if amdb_timeout <= 0:
+            raise ValueError("T2med-AMDB-Timeout muss größer als 0 sein")
         for page, angle in forced_page_rotations:
             if page < 1 or angle not in {"+90", "-90", "+180", "-180", "+270", "-270"}:
                 raise ValueError("Ungültige erzwungene Seitendrehung")
@@ -140,7 +145,10 @@ class OcrmypdfBackend(OcrBackend):
         self._auto_orient_pages = auto_orient_pages
         self._orientation_min_confidence = orientation_min_confidence
         self._medication_plan_codes = medication_plan_codes
-        self._pzn_database = pzn_database
+        self._amdb_config = amdb_config
+        self._amdb_client = amdb_client
+        self._amdb_socket = amdb_socket
+        self._amdb_timeout = amdb_timeout
         self._barcode_dpi = barcode_dpi
         self._barcode_retry_dpi = barcode_retry_dpi
         self._progress = progress or (lambda message: None)
@@ -522,7 +530,10 @@ class OcrmypdfBackend(OcrBackend):
         if not self._medication_plan_codes:
             return MedicationPlanScan({}, 0, {"disabled": True})
         scanner = MedicationPlanScanner(
-            pzn_database=self._pzn_database,
+            amdb_config=self._amdb_config,
+            amdb_client=self._amdb_client,
+            amdb_socket=self._amdb_socket,
+            amdb_timeout=self._amdb_timeout,
             pdftoppm=self._pdftoppm,
             dpi=self._barcode_dpi,
             retry_dpi=self._barcode_retry_dpi,

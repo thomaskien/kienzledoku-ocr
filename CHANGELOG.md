@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5 – 31.08.2026
+
+- PZN-Auflösung der Bundesmedikationspläne direkt über die aktive lokale
+  T2med-Arzneimitteldatenbank statt über eine separat gepflegte SQLite-Datei
+- Aktives Schema wird bei jedem Start aus T2meds `mmi/service.conf` gelesen;
+  `mmidata1`/`mmidata2`-Wechsel werden automatisch berücksichtigt
+- Ausschließlich lesende MariaDB-Abfragen über T2meds mitgelieferten Client und
+  lokalen Socket; jede Ausführung ist zusätzlich in eine
+  `START TRANSACTION READ ONLY`-Transaktion eingeschlossen
+- Arzneimittelauflösung aus `MEDPLAN_PACKAGE` mit PZN, Handelsname, Wirkstoff,
+  Stärke und Medikationsplan-Darreichungsform
+- Deutliche Konsolenausgabe beim Verbindungsaufbau und eine Ergebniszeile für
+  jede abgefragte oder nicht gefundene PZN
+- Eigenständige Prüf-CLI `t2med-amdb.py`; Installer prüft Konfiguration, Client,
+  aktives Schema und Socket, ohne T2med-Daten zu verändern
+- Sichere Rückkehr zur normalen Seiten-OCR bei Verbindungs- oder
+  PZN-Abfragefehlern; der übrige Dokumentenbatch läuft weiter
+
 ## 1.4.1 – 31.08.2026
 
 - BfArM-Bezugsweg korrigiert: Die vollständigen Referenzdaten werden nicht als

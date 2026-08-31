@@ -246,13 +246,13 @@ class QrExtractorTests(unittest.TestCase):
 
 
 class MedicationPlanIntegrationTests(unittest.TestCase):
-    def test_scanner_uses_pzn_database_and_returns_page_replacement(self):
+    def test_scanner_uses_t2med_amdb_and_returns_page_replacement(self):
         class Resolver:
-            def __init__(self, path):
-                self.path = path
+            def __init__(self, **kwargs):
+                self.options = kwargs
 
             def metadata(self):
-                return {"release_date": "20260815"}
+                return {"schema": "mmidata1", "serverVersion": "11.4.5-MariaDB"}
 
             def lookup(self, pzn):
                 return {"name": "Testmed", "form_long": "Tablette", "form_short": None, "substances": []}
@@ -264,8 +264,9 @@ class MedicationPlanIntegrationTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "scan.pdf"
             source.write_bytes(b"%PDF")
-            database = root / "bfarm.sqlite"
-            database.touch()
+            config = root / "service.conf"
+            client = root / "mariadb"
+            socket = root / "t2med-mariadb"
             extraction = QrExtractionResult(
                 str(source), (qr_code(BMP_XML.encode("iso-8859-1")),), (), 2
             )
@@ -273,13 +274,18 @@ class MedicationPlanIntegrationTests(unittest.TestCase):
                 "kienzledoku_ocr_backfill.medication_plans.extract_qr_codes",
                 return_value=extraction,
             ), mock.patch(
-                "kienzledoku_ocr_backfill.medication_plans.PZNResolver", Resolver
+                "kienzledoku_ocr_backfill.medication_plans.T2medAmdbResolver", Resolver
             ):
-                scan = MedicationPlanScanner(pzn_database=database).scan(source)
+                scan = MedicationPlanScanner(
+                    amdb_config=config,
+                    amdb_client=client,
+                    amdb_socket=socket,
+                ).scan(source)
         self.assertEqual(set(scan.pages), {1})
         self.assertIn("1\t| Testmed", scan.pages[1])
         self.assertIn("BEGINN BUNDESMEDIKATIONSPLAN", scan.pages[1])
-        self.assertEqual(scan.diagnostics["pznDatabaseRelease"], "20260815")
+        self.assertEqual(scan.diagnostics["amdbSchema"], "mmidata1")
+        self.assertEqual(scan.diagnostics["amdbServerVersion"], "11.4.5-MariaDB")
 
     def test_scanner_falls_back_to_ocr_when_database_is_missing(self):
         extraction = QrExtractionResult(
@@ -289,9 +295,40 @@ class MedicationPlanIntegrationTests(unittest.TestCase):
             "kienzledoku_ocr_backfill.medication_plans.extract_qr_codes",
             return_value=extraction,
         ):
-            scan = MedicationPlanScanner(pzn_database=Path("/missing.sqlite")).scan(Path("scan.pdf"))
+            scan = MedicationPlanScanner(
+                amdb_config=Path("/missing-service.conf"),
+                amdb_client=Path("/missing-mariadb"),
+                amdb_socket=Path("/missing-socket"),
+            ).scan(Path("scan.pdf"))
         self.assertEqual(scan.pages, {})
-        self.assertEqual(scan.diagnostics["errors"][-1]["stage"], "pzn_database")
+        self.assertEqual(scan.diagnostics["errors"][-1]["stage"], "t2med_amdb")
+
+    def test_scanner_falls_back_to_ocr_when_lookup_fails(self):
+        class Resolver:
+            def __init__(self, **kwargs):
+                del kwargs
+
+            def metadata(self):
+                return {"schema": "mmidata1", "serverVersion": "11.4.5-MariaDB"}
+
+            def lookup(self, pzn):
+                raise RuntimeError(f"Lesefehler für {pzn}")
+
+            def close(self):
+                pass
+
+        extraction = QrExtractionResult(
+            "scan.pdf", (qr_code(BMP_XML.encode("iso-8859-1")),), (), 1
+        )
+        with mock.patch(
+            "kienzledoku_ocr_backfill.medication_plans.extract_qr_codes",
+            return_value=extraction,
+        ), mock.patch(
+            "kienzledoku_ocr_backfill.medication_plans.T2medAmdbResolver", Resolver
+        ):
+            scan = MedicationPlanScanner().scan(Path("scan.pdf"))
+        self.assertEqual(scan.pages, {})
+        self.assertEqual(scan.diagnostics["errors"][-1]["stage"], "t2med_amdb_lookup")
 
     def test_backend_excludes_bmp_page_and_combines_page_text(self):
         with tempfile.TemporaryDirectory() as tmp:

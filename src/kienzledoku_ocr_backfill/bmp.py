@@ -317,10 +317,7 @@ def _resolved_medication(
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     if medication.pzn is None or resolver is None:
         return None, medication.pzn
-    try:
-        return resolver.lookup(medication.pzn), None
-    except Exception:
-        return None, medication.pzn
+    return resolver.lookup(medication.pzn), None
 
 
 def _substances(
