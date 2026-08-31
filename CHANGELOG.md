@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.1 – 31.08.2026
+
+- Data-Matrix-Decoder mit Ubuntu 24.04s älterer `zxingcpp`-API kompatibel:
+  automatischer zweiter Aufruf ohne den dort unbekannten Parameter `try_invert`
+- Decoder-, Render- und Abhängigkeitsfehler werden im normalen OCR-Lauf sichtbar
+  auf der Konsole ausgegeben statt nur in den Diagnosedaten gespeichert
+- Eindeutige Abschlussmeldung mit Anzahl gefundener Codes beziehungsweise
+  `kein Code gefunden` und Anzahl geprüfter Seiten
+
 ## 1.5 – 31.08.2026
 
 - PZN-Auflösung der Bundesmedikationspläne direkt über die aktive lokale

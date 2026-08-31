@@ -68,6 +68,26 @@ class MedicationPlanScanner:
             "amdbSchema": None,
             "amdbServerVersion": None,
         }
+        for error in extracted.errors:
+            location = (
+                f"Seite {error.get('page')}"
+                if error.get("page") is not None
+                else "Dokument"
+            )
+            stage = error.get("stage") or "unbekannt"
+            detail = " ".join(str(error.get("error") or "unbekannter Fehler").split())
+            self._progress(
+                f"Data-Matrix-Fehler ({location}, {stage}): {detail[:500]}"
+            )
+        if extracted.codes:
+            self._progress(
+                f"Data-Matrix-Prüfung: {len(extracted.codes)} Code(s) gefunden"
+            )
+        else:
+            self._progress(
+                "Data-Matrix-Prüfung: kein Code gefunden "
+                f"({extracted.pages_scanned} Seite(n) geprüft)"
+            )
         parsed_plans: list[tuple[Any, Any]] = []
         for code in extracted.codes:
             try:

@@ -143,7 +143,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(records[1]["revisionBefore"], 0)
             self.assertEqual(records[1]["revisionAfter"], 1)
             self.assertIn("----- BEGINN kienzledoku OCR -----", aps.text)
-            self.assertIn("kienzledoku OCR v1.5,", aps.text)
+            self.assertIn("kienzledoku OCR v1.5.1,", aps.text)
             self.assertTrue(aps.text.endswith("----- ENDE kienzledoku OCR -----"))
 
     def test_existing_marker_skips_download_and_ocr(self):

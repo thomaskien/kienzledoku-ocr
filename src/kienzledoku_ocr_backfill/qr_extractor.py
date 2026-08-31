@@ -114,12 +114,23 @@ def _decode_image(
 ) -> list[QrCode]:
     found: list[QrCode] = []
     seen: set[tuple[str, bytes, tuple[tuple[str, int], ...]]] = set()
-    results = zxingcpp.read_barcodes(
-        image,
-        try_rotate=True,
-        try_downscale=True,
-        try_invert=True,
-    )
+    try:
+        results = zxingcpp.read_barcodes(
+            image,
+            try_rotate=True,
+            try_downscale=True,
+            try_invert=True,
+        )
+    except TypeError as exc:
+        if "try_invert" not in str(exc):
+            raise
+        # Ubuntu 24.04 ships an older zxing-cpp Python API without
+        # ``try_invert``. Black-on-white codes remain fully decodable there.
+        results = zxingcpp.read_barcodes(
+            image,
+            try_rotate=True,
+            try_downscale=True,
+        )
     for barcode in results:
         raw = bytes(barcode.bytes)
         try:

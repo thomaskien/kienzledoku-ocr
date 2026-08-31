@@ -194,6 +194,43 @@ class QrExtractorTests(unittest.TestCase):
         self.assertEqual(codes[0].rect, {"left": 10, "top": 20, "width": 30, "height": 40})
         self.assertEqual(codes[0].as_dict()["base64"], base64.b64encode(b"\xffBMP").decode())
 
+    def test_ubuntu_zxing_api_without_try_invert_is_supported(self):
+        class Point:
+            def __init__(self, x, y):
+                self.x, self.y = x, y
+
+        class Position:
+            top_left = Point(1, 2)
+            top_right = Point(11, 2)
+            bottom_right = Point(11, 12)
+            bottom_left = Point(1, 12)
+
+        class Format:
+            name = "DataMatrix"
+
+        barcode = mock.Mock(bytes=b"<MP v=\"027\"/>", position=Position(), format=Format())
+
+        class LegacyZxing:
+            def __init__(self):
+                self.calls = []
+
+            def read_barcodes(self, image, **kwargs):
+                del image
+                self.calls.append(kwargs)
+                if "try_invert" in kwargs:
+                    raise TypeError("unexpected keyword argument 'try_invert'")
+                return [barcode]
+
+        zxing = LegacyZxing()
+        codes = _decode_image(
+            object(), page=1, dpi=300, retry=False, zxingcpp=zxing
+        )
+
+        self.assertEqual(codes[0].data, b"<MP v=\"027\"/>")
+        self.assertEqual(len(zxing.calls), 2)
+        self.assertTrue(zxing.calls[0]["try_invert"])
+        self.assertNotIn("try_invert", zxing.calls[1])
+
     def test_pdf_pages_retry_independently(self):
         class OpenImage:
             def __init__(self, path):
@@ -302,6 +339,40 @@ class MedicationPlanIntegrationTests(unittest.TestCase):
             ).scan(Path("scan.pdf"))
         self.assertEqual(scan.pages, {})
         self.assertEqual(scan.diagnostics["errors"][-1]["stage"], "t2med_amdb")
+
+    def test_scanner_reports_decoder_errors_and_missing_codes(self):
+        extraction = QrExtractionResult(
+            "scan.pdf",
+            (),
+            (
+                {
+                    "page": 1,
+                    "stage": "decode",
+                    "error": "ZXing-Decoder nicht kompatibel",
+                },
+            ),
+            2,
+        )
+        progress = []
+        with mock.patch(
+            "kienzledoku_ocr_backfill.medication_plans.extract_qr_codes",
+            return_value=extraction,
+        ):
+            scan = MedicationPlanScanner(progress=progress.append).scan(
+                Path("scan.pdf")
+            )
+
+        self.assertEqual(scan.pages, {})
+        self.assertTrue(
+            any(
+                "Data-Matrix-Fehler (Seite 1, decode)" in message
+                for message in progress
+            )
+        )
+        self.assertIn(
+            "Data-Matrix-Prüfung: kein Code gefunden (2 Seite(n) geprüft)",
+            progress,
+        )
 
     def test_scanner_falls_back_to_ocr_when_lookup_fails(self):
         class Resolver:
