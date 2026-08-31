@@ -17,9 +17,9 @@ from kienzledoku_ocr_backfill.ocr.ocrmypdf import OcrmypdfBackend
 
 class DatabaseReaderTests(unittest.TestCase):
     CSV = (
-        "patientennummer,objectid,revision,classid,gueltigkeitszeitpunkt,verweis,name,mimetype,groesse\n"
-        "8100,doc1,2,60,2026-01-01,cdn://APS/Praxis/Patient/a,test.pdf,application/pdf,42\n"
-        "8200,doc2,3,60,2026-01-02,cdn://APS/Praxis/Patient/b,other.pdf,application/pdf,99\n"
+        "patientennummer,patientenname,objectid,revision,classid,gueltigkeitszeitpunkt,verweis,name,mimetype,groesse\n"
+        "8100,Erika Muster,doc1,2,60,2026-01-01,cdn://APS/Praxis/Patient/a,test.pdf,application/pdf,42\n"
+        "8200,Max Beispiel,doc2,3,60,2026-01-02,cdn://APS/Praxis/Patient/b,other.pdf,application/pdf,99\n"
     )
 
     def test_inventory_filters_without_dynamic_sql(self):
@@ -27,6 +27,7 @@ class DatabaseReaderTests(unittest.TestCase):
         with mock.patch.object(reader, "_run", return_value=self.CSV) as run:
             items = reader.inventory(patient_number="8200", limit=1)
         self.assertEqual([item.object_id for item in items], ["doc2"])
+        self.assertEqual(items[0].patient_name, "Max Beispiel")
         self.assertEqual(run.call_args.args[0], INVENTORY_SQL)
         self.assertIn("v.classid = 60", INVENTORY_SQL)
         self.assertNotIn("UPDATE", INVENTORY_SQL.upper())
@@ -34,10 +35,10 @@ class DatabaseReaderTests(unittest.TestCase):
 
     def test_limit_counts_supported_pdfs_not_other_document_types(self):
         csv_text = (
-            "patientennummer,objectid,revision,classid,gueltigkeitszeitpunkt,verweis,name,mimetype,groesse\n"
-            "100,not-pdf,1,60,2026-01-01,cdn://a,letter.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,10\n"
-            "100,pdf-by-mime,1,60,2026-01-02,cdn://b,scan,application/pdf,20\n"
-            "100,pdf-by-name,1,60,2026-01-03,cdn://c,scan.PDF,application/octet-stream,30\n"
+            "patientennummer,patientenname,objectid,revision,classid,gueltigkeitszeitpunkt,verweis,name,mimetype,groesse\n"
+            "100,,not-pdf,1,60,2026-01-01,cdn://a,letter.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,10\n"
+            "100,,pdf-by-mime,1,60,2026-01-02,cdn://b,scan,application/pdf,20\n"
+            "100,,pdf-by-name,1,60,2026-01-03,cdn://c,scan.PDF,application/octet-stream,30\n"
         )
         reader = DatabaseReader(T2medConfig())
         with mock.patch.object(reader, "_run", return_value=csv_text):
@@ -132,6 +133,7 @@ class OcrmypdfBackendTests(unittest.TestCase):
                 qpdf=str(fake_qpdf),
                 rotate_pages_threshold=2.0,
                 forced_page_rotations=((1, "+90"),),
+                auto_orient_pages=False,
             )
             text = backend.extract_text(source, "application/pdf")
 
@@ -164,7 +166,127 @@ class OcrmypdfBackendTests(unittest.TestCase):
             self.assertIn("--rotate=+90:1", qpdf_arguments)
             self.assertIn("--flatten-rotation", qpdf_arguments)
             self.assertNotEqual(arguments[-2], str(source))
-            self.assertTrue(arguments[-2].endswith("forced-rotation.pdf"))
+            self.assertTrue(arguments[-2].endswith("oriented.pdf"))
+
+    def test_osd_orients_each_page_and_records_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            progress = []
+            fake_pdftoppm = root / "pdftoppm"
+            fake_pdftoppm.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "prefix = Path(sys.argv[-1])\n"
+                "if '-singlefile' in sys.argv:\n"
+                "    prefix.with_suffix('.png').write_bytes(b'PNG')\n"
+                "else:\n"
+                "    Path(str(prefix) + '-1.png').write_bytes(b'PAGE1')\n"
+                "    Path(str(prefix) + '-2.png').write_bytes(b'PAGE2')\n",
+                encoding="utf-8",
+            )
+            fake_pdftoppm.chmod(0o755)
+            fake_tesseract = root / "tesseract"
+            fake_tesseract.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "name = sys.argv[1]\n"
+                "if name.endswith('-1.png'):\n"
+                "    print('Orientation in degrees: 270')\n"
+                "    print('Rotate: 90')\n"
+                "    print('Orientation confidence: 10.79')\n"
+                "else:\n"
+                "    print('Orientation in degrees: 0')\n"
+                "    print('Rotate: 0')\n"
+                "    print('Orientation confidence: 11.70')\n",
+                encoding="utf-8",
+            )
+            fake_tesseract.chmod(0o755)
+            qpdf_log = root / "qpdf-log.json"
+            fake_qpdf = root / "qpdf"
+            fake_qpdf.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, shutil, sys\n"
+                "from pathlib import Path\n"
+                f"Path({str(qpdf_log)!r}).write_text(json.dumps(sys.argv), encoding='utf-8')\n"
+                "shutil.copyfile(sys.argv[1], sys.argv[2])\n",
+                encoding="utf-8",
+            )
+            fake_qpdf.chmod(0o755)
+            source = root / "input.pdf"
+            source.write_bytes(b"%PDF-input")
+
+            backend = OcrmypdfBackend(
+                pdftoppm=str(fake_pdftoppm),
+                qpdf=str(fake_qpdf),
+                tesseract=str(fake_tesseract),
+                progress=progress.append,
+            )
+            with tempfile.TemporaryDirectory() as work:
+                oriented = backend._prepare_ocr_input(source, Path(work))
+                self.assertEqual(oriented.read_bytes(), b"%PDF-input")
+
+            qpdf_arguments = json.loads(qpdf_log.read_text(encoding="utf-8"))
+            self.assertIn("--rotate=+90:1", qpdf_arguments)
+            self.assertNotIn("--rotate=+90:2", qpdf_arguments)
+            decisions = backend.diagnostics()["pageOrientations"]
+            self.assertEqual(
+                [(entry["page"], entry["rotation"], entry["method"]) for entry in decisions],
+                [(1, "+90", "osd"), (2, "0", "osd")],
+            )
+            self.assertIn("Orientierung Seite 1: +90° (osd, Konfidenz 10.79)", progress)
+            self.assertIn("Orientierung Seite 2: 0° (osd, Konfidenz 11.7)", progress)
+
+    def test_four_way_score_rewards_medication_vocabulary(self):
+        header = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
+        ordinary = header + "5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t70\txyz\n"
+        medication = (
+            header
+            + "5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t70\tMedikationsplan\n"
+            + "5\t1\t1\t1\t1\t2\t0\t0\t1\t1\t70\tWirkstoff\n"
+        )
+        self.assertGreater(
+            OcrmypdfBackend._score_tsv(medication.encode())["score"],
+            OcrmypdfBackend._score_tsv(ordinary.encode())["score"],
+        )
+
+    def test_four_way_fallback_selects_clear_best_rotation(self):
+        header = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
+        weak = header + "5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t20\tx\n"
+        strong = (
+            header
+            + "5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t85\tMedikationsplan\n"
+            + "5\t1\t1\t1\t1\t2\t0\t0\t1\t1\t85\tWirkstoff\n"
+            + "5\t1\t1\t1\t1\t3\t0\t0\t1\t1\t85\tTabletten\n"
+        )
+        backend = OcrmypdfBackend()
+
+        def candidate(_source, _original, _page, angle, tmp):
+            return tmp / f"candidate-{angle}.png"
+
+        def tesseract(command, *, timeout):
+            del timeout
+            payload = strong if command[1].endswith("candidate-90.png") else weak
+            return mock.Mock(returncode=0, stdout=payload.encode(), stderr=b"")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(backend, "_candidate_image", side_effect=candidate):
+                with mock.patch(
+                    "kienzledoku_ocr_backfill.ocr.ocrmypdf._run",
+                    side_effect=tesseract,
+                ):
+                    decision = backend._four_way_decision(
+                        Path(tmp) / "source.pdf",
+                        Path(tmp) / "page.png",
+                        1,
+                        1.5,
+                        Path(tmp),
+                    )
+
+        self.assertEqual(decision.rotation, "+90")
+        self.assertEqual(decision.method, "four_way")
+        self.assertEqual(decision.status, "rotated")
+        self.assertGreater(decision.scores["margin"], 4.0)
 
 
 class JournalTests(unittest.TestCase):

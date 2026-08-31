@@ -12,7 +12,7 @@ from kienzledoku_ocr_backfill.processor import BackfillProcessor
 from kienzledoku_ocr_backfill.formatter import compose_text
 
 
-def item(object_id="doc1", patient="8100"):
+def item(object_id="doc1", patient="8100", patient_name=None):
     return InventoryItem(
         patient_number=patient,
         object_id=object_id,
@@ -23,6 +23,7 @@ def item(object_id="doc1", patient="8100"):
         filename=f"{object_id}.pdf",
         mime_type="application/pdf",
         size=3,
+        patient_name=patient_name,
     )
 
 
@@ -84,6 +85,20 @@ class FakeOcr:
         self.calls += 1
         return self.text
 
+    def diagnostics(self):
+        return {
+            "pageOrientations": [
+                {
+                    "page": 1,
+                    "rotation": "+90",
+                    "confidence": 10.79,
+                    "method": "osd",
+                    "status": "rotated",
+                    "scores": None,
+                }
+            ]
+        }
+
 
 def read_records(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
@@ -109,6 +124,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(record["oldText"], "Alter Titel")
             self.assertEqual(record["ocrChars"], len("Erkannter Text"))
             self.assertEqual(len(record["newTextSha256"]), 64)
+            self.assertEqual(record["ocrDiagnostics"]["pageOrientations"][0]["rotation"], "+90")
 
     def test_apply_writes_old_text_before_update_then_verifies(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -127,7 +143,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(records[1]["revisionBefore"], 0)
             self.assertEqual(records[1]["revisionAfter"], 1)
             self.assertIn("----- BEGINN kienzledoku OCR -----", aps.text)
-            self.assertIn("kienzledoku OCR v1.1.1,", aps.text)
+            self.assertIn("kienzledoku OCR v1.3,", aps.text)
             self.assertTrue(aps.text.endswith("----- ENDE kienzledoku OCR -----"))
 
     def test_existing_marker_skips_download_and_ocr(self):
@@ -136,13 +152,20 @@ class PipelineTests(unittest.TestCase):
             aps = FakeAps("Alt\n\nkienzledoku OCR v1.00, 30.08.2026 14:55")
             cdn = FakeCdn()
             ocr = FakeOcr()
+            progress = []
             with Journal(path) as journal:
-                handler = DocumentReferenceHandler(FakeDatabase(aps), cdn, aps, ocr, journal)
+                handler = DocumentReferenceHandler(
+                    FakeDatabase(aps), cdn, aps, ocr, journal, report=progress.append
+                )
                 status = handler.process(item(), apply=True)
             self.assertEqual(status, "already_ocr")
             self.assertEqual(cdn.calls, [])
             self.assertEqual(ocr.calls, 0)
             self.assertEqual(aps.update_calls, 0)
+            self.assertIn(
+                "OCR-Status: bereits erfolgt mit Version 1.00 am 30.08.2026 14:55",
+                progress,
+            )
 
     def test_reprocess_replaces_complete_managed_block(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,6 +275,55 @@ class PipelineTests(unittest.TestCase):
                     [item("doc1")], apply=True, resume=True
                 )
             self.assertEqual(summary.counts, {"resume_skipped": 1})
+
+    def test_detailed_progress_output_for_serial_documents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "journal.jsonl"
+            aps = FakeAps("Titelzeile 1\nTitelzeile 2\nTitelzeile 3")
+            progress = []
+            with Journal(path) as journal:
+                handler = DocumentReferenceHandler(
+                    FakeDatabase(aps),
+                    FakeCdn(),
+                    aps,
+                    FakeOcr(),
+                    journal,
+                    report=progress.append,
+                )
+                summary = BackfillProcessor(
+                    handler, journal, report=progress.append
+                ).run(
+                    [
+                        item("doc1", patient_name="Thomas Test"),
+                        item("doc2", patient_name="Thomas Test"),
+                    ],
+                    apply=False,
+                    resume=False,
+                )
+
+            self.assertEqual(summary.counts, {"dry_run": 2})
+            required = (
+                "Identifiziere Dokument",
+                "Dokumenten-ID: doc1",
+                "Dokumentendatum: 2026-01-01",
+                "Patient: 8100 Thomas Test",
+                "Dokumententitel:",
+                "  Titelzeile 1",
+                "  Titelzeile 2",
+                "Dokument wird geladen",
+                "Dokumentenname:",
+                "  doc1.pdf",
+                "OCR-Status: noch nicht erfolgt",
+                "OCR läuft",
+                "OCR erfolgreich",
+                "OCR-Text würde geschrieben (Dry-Run)",
+                "Dokument fertig",
+                "Nächstes Dokument",
+                "Dokumenten-ID: doc2",
+            )
+            positions = [progress.index(message) for message in required]
+            self.assertEqual(positions, sorted(positions))
+            self.assertNotIn("Titelzeile 3", progress)
 
 
 if __name__ == "__main__":

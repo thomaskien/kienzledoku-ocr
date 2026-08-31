@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.1.1 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises.
+Version 1.3 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -17,6 +17,7 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - Ein Dokumentfehler wird journalisiert; anschließend läuft der Batch mit dem nächsten Dokument weiter.
 - Bereits vorhandene Marker `kienzledoku OCR v…` verhindern standardmäßig Doppelanhänge.
 - Version 1.1 grenzt jeden neuen OCR-Anteil mit festen BEGINN-/ENDE-Markern ab. `--reprocess` ersetzt den Block gezielt, statt ihn erneut anzuhängen.
+- Version 1.3 prüft die Orientierung jeder PDF-Seite vor OCR, dreht nur eine temporäre Arbeitskopie und journalisiert die Entscheidung.
 - Schreibvorgänge laufen bewusst nicht parallel.
 
 `classid = 59` (Bildeinträge) ist nicht freigeschaltet. Dafür muss zuerst der eigene APS-Adapter end-to-end bestätigt werden. `--limit` wird erst nach der Dateiinfo-Prüfung angewendet und zählt damit tatsächliche PDF-Kandidaten; andere `classid-60`-Dateitypen verbrauchen das Limit nicht.
@@ -26,9 +27,9 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - Python 3.9 oder neuer
 - lokaler Lesezugriff über T2meds `psql`, standardmäßig `/opt/t2med/server/postgres/bin/psql`
 - T2med-Benutzer für APS und CDN
-- `ocrmypdf`, Tesseract mit `deu`/`eng`, `pdftotext`, Ghostscript, qpdf und unpaper
+- `ocrmypdf`, Tesseract mit `deu`/`eng`/`osd`, `pdftotext`, `pdftoppm`, Ghostscript, qpdf und unpaper
 
-Das Standardbackend entspricht der bestätigten KienzleFax-Pipeline: OCRmyPDF/Tesseract mit `deu+eng`, OEM 1, Seitendrehung, Entzerrung, Reinigung, 300-dpi-Oversampling, PDF/A-3, Optimierung 1, 300 Sekunden Tesseract-Zeitlimit je Seite und zwei internen Jobs. Seiten ohne Textschicht werden durch Tesseract erkannt; bei Seiten mit vorhandenem PDF-Text bleibt dieser erhalten und wird nicht unnötig erneut OCR-erkannt. Anschließend liest `pdftotext` den vorhandenen und den neu erkannten Text gemeinsam und ohne Steuerzeichen für Seitenumbrüche aus dem temporären OCR-PDF. Dieses PDF wird verworfen; die T2med-CDN-Datei wird nicht verändert.
+Das Standardbackend entspricht der bestätigten KienzleFax-Pipeline: OCRmyPDF/Tesseract mit `deu+eng`, OEM 1, Seitendrehung, Entzerrung, Reinigung, 300-dpi-Oversampling, PDF/A-3, Optimierung 1, 300 Sekunden Tesseract-Zeitlimit je Seite und zwei internen Jobs. Davor prüft Version 1.3 jede Seite mit Tesseract OSD. Ist die Lage nicht eindeutig, werden 0°, 90°, 180° und 270° anhand eines kurzen OCR-Laufs verglichen. Nur eine ausreichend deutliche Entscheidung wird auf die temporäre Arbeitskopie angewandt. Seiten ohne Textschicht werden durch Tesseract erkannt; bei Seiten mit vorhandenem PDF-Text bleibt dieser erhalten und wird nicht unnötig erneut OCR-erkannt. Anschließend liest `pdftotext` den vorhandenen und den neu erkannten Text gemeinsam und ohne Steuerzeichen für Seitenumbrüche aus dem temporären OCR-PDF. Diese Arbeitsdateien werden verworfen; die T2med-CDN-Datei wird nicht verändert.
 
 Auf Debian/Raspberry Pi OS werden dieselben Pakete wie bei KienzleFax benötigt:
 
@@ -49,34 +50,38 @@ Ohne zusätzliche Option wird das KienzleFax-OCRmyPDF-Backend verwendet. Seine P
 ```bash
 --ocrmypdf /usr/bin/ocrmypdf \
 --pdftotext /usr/bin/pdftotext \
+--pdftoppm /usr/bin/pdftoppm \
 --qpdf /usr/bin/qpdf \
+--tesseract /usr/bin/tesseract \
 --ocr-language deu+eng \
 --ocr-jobs 2 \
+--orientation-confidence 5 \
 --rotate-pages-threshold 14 \
 --tesseract-timeout 300
 ```
 
-OCRmyPDF dreht Seiten in 90°-Schritten nur, wenn die erkannte Orientierung die
-eingestellte Sicherheitsschwelle erreicht. Der Standard `14` bleibt für den
-allgemeinen Batch bewusst konservativ. Bei einem seitlich eingescannten,
-tabellarischen Dokument kann die Drehung gezielt aggressiver getestet werden:
+`--orientation-confidence` steuert, ab welcher OSD-Konfidenz eine Lage direkt
+übernommen wird. Unterhalb des Standards `5` startet automatisch der
+Vierfachvergleich. `--rotate-pages-threshold` bleibt als nachgelagerte
+OCRmyPDF-Sicherung erhalten. Für Diagnosezwecke kann die neue Vorprüfung mit
+`--no-auto-orient-pages` deaktiviert werden.
+
+Bei einem seitlich eingescannten, tabellarischen Dokument genügt mit Version
+1.3 normalerweise ein gezielter Neu-Lauf ohne manuelle Drehangabe:
 
 ```bash
 T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
   --dry-run \
+  --reprocess \
   --username t2user \
   --object-id OBJECTID_DES_DOKUMENTS \
-  --rotate-pages-threshold 2.0 \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
   --insecure
 ```
 
-Der niedrigere Wert sollte zunächst nur für das betroffene Dokument verwendet
-werden, weil er bei mehrdeutigen Seiten auch falsche Drehungen begünstigt.
-
-Enthält eine Seite gleichzeitig waagerechten und seitlichen Text, kann auch eine
-niedrige Automatikschwelle wirkungslos bleiben. Dann lässt sich eine bekannte
-Seite ausschließlich in der temporären OCR-Arbeitskopie ausdrücklich drehen:
+Die Konsole meldet für jede Seite Lage, Methode und Konfidenz. Bleibt eine Seite
+als `unsicher` bei 0°, lässt sich die fachlich bekannte Lage weiterhin
+ausschließlich in der temporären OCR-Arbeitskopie vorgeben:
 
 ```bash
 T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
@@ -92,7 +97,7 @@ T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
 `--force-rotate-page` kann für mehrere Seiten wiederholt werden. Zulässige
 Winkel sind `+90`, `-90`, `+180`, `-180`, `+270` und `-270`. qpdf verändert nur
 eine automatisch gelöschte temporäre Kopie; CDN-Original und T2med-PDF bleiben
-unverändert.
+unverändert. Die manuelle Angabe hat für diese Seite Vorrang vor der Automatik.
 
 Die OCR-Abstraktion bleibt erhalten. Ein eigener Befehl kann ausdrücklich mit `--ocr-command` eingesetzt werden. Er wird ohne Shell gestartet; `{input}` ist verpflichtend. Liefert das Programm den Text auf stdout, genügt zum Beispiel:
 
@@ -168,8 +173,8 @@ python3 ./kienzledoku-ocr.py --apply --resume [Verbindungs- und OCR-Optionen]
 ## Erneute OCR mit einer neuen Version
 
 `--reprocess` führt OCR bewusst auch bei bereits markierten Dokumenten erneut
-aus. Ein vollständig markierter Version-1.1-Block wird entfernt und durch genau
-einen frischen Block ersetzt. Bei älteren v1.00-Einträgen ohne Beginnmarke wird
+aus. Ein vollständig markierter KienzleDoku-OCR-Block wird entfernt und durch
+genau einen frischen Block ersetzt. Bei älteren v1.00-Einträgen ohne Beginnmarke wird
 der ursprüngliche Text nur dann aus dem verwendeten Journal übernommen, wenn
 dessen gespeicherter SHA-256-Hash exakt dem aktuellen T2med-Text entspricht.
 Andernfalls meldet das Programm `reprocess_conflict` und schreibt nichts.
@@ -198,7 +203,7 @@ Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
 ----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.1.1, 31.08.2026 14:55
+kienzledoku OCR v1.3, 31.08.2026 14:55
 ----- ENDE kienzledoku OCR -----
 ```
 
@@ -206,7 +211,7 @@ Die Footerzeit wird immer in `Europe/Berlin` erzeugt.
 
 ## Journal und Status
 
-Das Journal enthält Patientennummer, Dokumentmetadaten und bei schreibenden Vorgängen den vollständigen bisherigen Text. Es enthält damit medizinische Daten, wird mit Modus `0600` angelegt und gehört in ein entsprechend geschütztes Verzeichnis.
+Das Journal enthält Patientennummer, Dokumentmetadaten, die seitenweisen Orientierungsentscheidungen und bei schreibenden Vorgängen den vollständigen bisherigen Text. Es enthält damit medizinische Daten, wird mit Modus `0600` angelegt und gehört in ein entsprechend geschütztes Verzeichnis. Ein ermittelter Patientenname wird nur auf der lokalen Konsole gezeigt und nicht zusätzlich journalisiert.
 
 Wichtige Statuswerte sind `dry_run`, `update_prepared`, `updated`, `already_ocr`, `reprocess_conflict`, `missing_cdn`, `unsupported_type`, `download_failed`, `ocr_failed`, `ocr_empty`, `aps_find_failed`, `aps_update_failed` und `verification_failed`.
 
@@ -239,4 +244,6 @@ Zurückgesetzt werden ausschließlich zuvor vollständig verifizierte `updated`-
 - `2`: Batch beendet, mindestens ein Dokument hatte einen Fehler oder Rollback-Konflikt
 - `130`: interaktiv abgebrochen
 
-Weitere praktische Prüfschritte stehen in [docs/BETRIEB.md](docs/BETRIEB.md).
+Die genaue Fortschrittsausgabe und Orientierungsentscheidung beschreibt
+[docs/VERSION-1.3.md](docs/VERSION-1.3.md). Weitere praktische Prüfschritte
+stehen in [docs/BETRIEB.md](docs/BETRIEB.md).

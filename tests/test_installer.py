@@ -48,7 +48,7 @@ class DependencyInstallerTests(unittest.TestCase):
             )
             tesseract.chmod(0o755)
 
-            for name in ("pdftotext", "gs", "qpdf", "unpaper"):
+            for name in ("pdftotext", "pdftoppm", "gs", "qpdf", "unpaper"):
                 stub = bin_dir / name
                 stub.write_text(
                     "#!/usr/bin/env bash\necho 'tool test'\n",

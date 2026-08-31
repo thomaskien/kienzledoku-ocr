@@ -131,7 +131,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--ocr-timeout", type=float, default=1800.0)
     parser.add_argument("--ocrmypdf", default="ocrmypdf", help="OCRmyPDF-Programm oder absoluter Pfad")
     parser.add_argument("--pdftotext", default="pdftotext", help="pdftotext-Programm oder absoluter Pfad")
+    parser.add_argument("--pdftoppm", default="pdftoppm", help="pdftoppm-Programm oder absoluter Pfad")
     parser.add_argument("--qpdf", default="qpdf", help="qpdf-Programm oder absoluter Pfad")
+    parser.add_argument("--tesseract", default="tesseract", help="Tesseract-Programm oder absoluter Pfad")
     parser.add_argument("--ocr-language", default="deu+eng", help="Tesseract-Sprachen; Standard deu+eng")
     parser.add_argument("--ocr-jobs", type=_positive_int, default=2, help="Interne OCRmyPDF-Jobs; Standard 2")
     parser.add_argument(
@@ -139,8 +141,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=_nonnegative_float,
         default=14.0,
         help=(
-            "Sicherheitsschwelle für automatische 90°-Seitendrehung; Standard 14. "
-            "Für schwierige Tabellen gezielt 2.0 testen."
+            "Nachgelagerte OCRmyPDF-Schwelle für automatische Seitendrehung; "
+            "Standard 14"
         ),
     )
     parser.add_argument(
@@ -153,6 +155,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
             "Eine PDF-Seite in der temporären OCR-Kopie ausdrücklich drehen, "
             "z. B. 1:+90; für mehrere Seiten wiederholen"
         ),
+    )
+    parser.add_argument(
+        "--no-auto-orient-pages",
+        dest="auto_orient_pages",
+        action="store_false",
+        default=True,
+        help="Automatische seitenweise Orientierungsprüfung deaktivieren",
+    )
+    parser.add_argument(
+        "--orientation-confidence",
+        type=_nonnegative_float,
+        default=5.0,
+        help="Mindestkonfidenz für direkte Tesseract-OSD-Drehung; Standard 5",
     )
     parser.add_argument(
         "--tesseract-timeout",
@@ -242,23 +257,23 @@ def run(args: argparse.Namespace) -> int:
                 ocr = OcrmypdfBackend(
                     ocrmypdf=args.ocrmypdf,
                     pdftotext=args.pdftotext,
+                    pdftoppm=args.pdftoppm,
                     qpdf=args.qpdf,
+                    tesseract=args.tesseract,
                     language=args.ocr_language,
                     jobs=args.ocr_jobs,
                     timeout=args.ocr_timeout,
                     tesseract_timeout=args.tesseract_timeout,
                     rotate_pages_threshold=args.rotate_pages_threshold,
                     forced_page_rotations=args.force_rotate_page,
+                    auto_orient_pages=args.auto_orient_pages,
+                    orientation_min_confidence=args.orientation_confidence,
+                    progress=print,
                 )
         except ValueError as exc:
             raise BackfillError(str(exc)) from exc
 
     username, password = _credentials(args)
-    for page, angle in args.force_rotate_page:
-        print(
-            f"OCR-Vorverarbeitung: Seite {page} wird in der temporären "
-            f"Arbeitskopie um {angle}° gedreht."
-        )
     ssl_context = make_ssl_context(config.insecure, config.ca_cert)
     if config.insecure:
         print("WARNUNG: TLS-Zertifikatsprüfung ist deaktiviert.", file=sys.stderr)
@@ -300,7 +315,7 @@ def run(args: argparse.Namespace) -> int:
                 report=print,
                 reprocess_existing=args.reprocess,
             )
-            summary = BackfillProcessor(handler, journal).run(
+            summary = BackfillProcessor(handler, journal, report=print).run(
                 inventory,
                 apply=args.apply,
                 resume=args.resume,

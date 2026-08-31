@@ -5,7 +5,7 @@
 1. Vollständiges T2med-Backup nach dem in der Praxis etablierten Verfahren erstellen und dessen Abschluss prüfen.
 2. Sicherstellen, dass kein zweiter Backfill gegen dasselbe Journal läuft. Die Anwendung setzt zusätzlich eine exklusive Lockdatei.
 3. Geschütztes Journalverzeichnis anlegen, beispielsweise `/var/lib/kienzledoku-ocr`, nur für den ausführenden Benutzer zugänglich.
-4. Die von KienzleFax bestätigten OCR-Komponenten prüfen: `ocrmypdf`, `tesseract`, Sprachdaten `deu`/`eng`, `pdftotext`, Ghostscript, qpdf und unpaper.
+4. Die von KienzleFax bestätigten OCR-Komponenten prüfen: `ocrmypdf`, `tesseract`, Sprachdaten `deu`/`eng`/`osd`, `pdftotext`, `pdftoppm`, Ghostscript, qpdf und unpaper.
 5. T2med-Zugangsdaten nicht in Skripten oder dem Git-Repository speichern.
 
 ## 2. Netzwerkfreier Test
@@ -30,29 +30,40 @@ Spätere rein lesende Prüfung:
 ./scripts/install-ocr-dependencies.sh --check
 ```
 
-Die Sprachliste muss mindestens `deu` und `eng` enthalten. Die Produktionspipeline verwendet dieselben OCRmyPDF-Parameter wie KienzleFax: Seiten ohne Textschicht werden OCR-erkannt, vorhandener PDF-Text wird beibehalten. Danach gewinnt `pdftotext -enc UTF-8 -nopgbrk` den vorhandenen und den neu erkannten Text gemeinsam.
+Die Sprachliste muss mindestens `deu`, `eng` und `osd` enthalten. Die Produktionspipeline verwendet dieselben OCRmyPDF-Parameter wie KienzleFax: Seiten ohne Textschicht werden OCR-erkannt, vorhandener PDF-Text wird beibehalten. Danach gewinnt `pdftotext -enc UTF-8 -nopgbrk` den vorhandenen und den neu erkannten Text gemeinsam.
 
 Der Installer aktualisiert nur die APT-Paketlisten und installiert die benötigten Pakete. Er führt bewusst kein `apt-get upgrade` aus.
 
 ### Seitlich eingescannte Tabellen
 
-Die automatische 90°-Drehung verwendet standardmäßig die konservative
-OCRmyPDF-Sicherheitsschwelle `14`. Erkennt OCRmyPDF die Orientierung eines
-tabellarischen Medikationsplans damit nicht sicher genug, wird nur dieses
-Dokument zunächst im Dry-Run mit `--rotate-pages-threshold 2.0` getestet. Der
-niedrigere Wert darf nicht ungeprüft auf den Gesamtlauf übertragen werden, da
-er bei mehrdeutigen Seiten falsche Drehungen wahrscheinlicher macht.
+Version 1.3 rendert jede Seite vor OCR mit `pdftoppm` und prüft sie zunächst mit
+Tesseract OSD. Sichere 0°-/90°-/180°-/270°-Entscheidungen werden unmittelbar
+übernommen. Bei niedriger Konfidenz vergleicht die Pipeline alle vier Lagen mit
+einem kurzen OCR-Lauf. Ist auch dieser Vergleich nicht eindeutig, bleibt die
+Seite unverändert und die Konsole meldet `unsicher`.
 
-Bleibt das Ergebnis bei einer Seite mit gemischten Textorientierungen trotzdem
-unverändert, wird die bekannte Seite ausdrücklich in der temporären
-OCR-Arbeitskopie gedreht:
+Jede Entscheidung wird unter `ocrDiagnostics.pageOrientations` im Journal
+gespeichert. Vor einem Gesamtlauf müssen insbesondere gedrehte und unsichere
+Seiten in einem Dry-Run fachlich kontrolliert werden. Bleibt die Automatik bei
+einer bekannten Seite falsch oder unsicher, wird die Lage ausdrücklich in der
+temporären OCR-Arbeitskopie vorgegeben:
 
 ```bash
 --force-rotate-page 1:+90
 ```
 
 Die Seitennummer ist einsbasiert, `+90` bedeutet im Uhrzeigersinn. Die
-CDN-Originaldatei wird dabei weder überschrieben noch neu hochgeladen.
+manuelle Vorgabe hat Vorrang vor der Automatik. Die CDN-Originaldatei wird dabei
+weder überschrieben noch neu hochgeladen.
+
+### Fortschrittsausgabe prüfen
+
+Ein normaler OCR-Kandidat zeigt mindestens Identifikation, Dokument-ID, Datum,
+Patient, zweizeiligen Titel, Laden, Dateiname, bisherigen OCR-Status, OCR-Start,
+Seitenausrichtung, OCR-Erfolg und Abschluss. Im Dry-Run muss ausdrücklich
+`OCR-Text würde geschrieben (Dry-Run)` erscheinen. Nur ein erfolgreicher
+`--apply`-Lauf darf `OCR-Text geschrieben` melden. Zwischen zwei Kandidaten wird
+`Nächstes Dokument` ausgegeben.
 
 ## 3. Testobjekt `test5.pdf`
 

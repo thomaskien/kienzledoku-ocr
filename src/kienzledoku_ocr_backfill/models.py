@@ -17,6 +17,7 @@ class InventoryItem:
     filename: Optional[str]
     mime_type: Optional[str]
     size: Optional[int]
+    patient_name: Optional[str] = None
 
 
 @dataclass(frozen=True)

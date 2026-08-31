@@ -18,10 +18,26 @@ BLOCK_RE = re.compile(
     rf"kienzledoku OCR v[0-9.]+,\s[^\r\n]+\n{re.escape(BLOCK_END)}\s*\Z"
 )
 BERLIN = ZoneInfo("Europe/Berlin")
+MARKER_DETAILS_RE = re.compile(
+    r"(?m)^kienzledoku OCR v(?P<version>[0-9.]+),\s*(?P<when>[^\r\n]+)$"
+)
 
 
 def contains_ocr_marker(text: Optional[str]) -> bool:
     return bool(MARKER_RE.search(text or ""))
+
+
+def latest_ocr_marker(text: Optional[str]) -> Optional[tuple[str, str]]:
+    matches = list(MARKER_DETAILS_RE.finditer(text or ""))
+    if not matches:
+        return None
+    match = matches[-1]
+    return match.group("version"), match.group("when").strip()
+
+
+def first_text_lines(text: Optional[str], *, count: int = 2) -> list[str]:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return lines[:count] or ["(leer)"]
 
 
 def remove_managed_ocr_block(text: Optional[str]) -> Optional[str]:

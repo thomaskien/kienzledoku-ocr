@@ -8,6 +8,8 @@ from kienzledoku_ocr_backfill.formatter import (
     BLOCK_END,
     compose_text,
     contains_ocr_marker,
+    first_text_lines,
+    latest_ocr_marker,
     make_footer,
     remove_managed_ocr_block,
 )
@@ -42,6 +44,16 @@ class FormatterTests(unittest.TestCase):
         value = compose_text("Titel", "Neuer OCR-Text", footer)
         self.assertEqual(remove_managed_ocr_block(value), "Titel")
         self.assertIsNone(remove_managed_ocr_block(value.removesuffix(BLOCK_END)))
+
+    def test_marker_details_and_two_line_preview(self):
+        value = (
+            "Titel\n\n"
+            "kienzledoku OCR v1.1, 31.08.2026 12:00\n"
+            "kienzledoku OCR v1.3, 31.08.2026 15:30"
+        )
+        self.assertEqual(latest_ocr_marker(value), ("1.3", "31.08.2026 15:30"))
+        self.assertEqual(first_text_lines(" Eins \n\nZwei\nDrei"), ["Eins", "Zwei"])
+        self.assertEqual(first_text_lines(None), ["(leer)"])
 
 
 class VerifierTests(unittest.TestCase):

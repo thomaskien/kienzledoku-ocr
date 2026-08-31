@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.1.1"
+VERSION="1.3"
 
 readonly PACKAGES=(
   ocrmypdf
@@ -37,7 +37,7 @@ verify_dependencies() {
   local required_option
 
   echo "Prüfe OCR-Programme ..."
-  for command_name in ocrmypdf tesseract pdftotext gs qpdf unpaper; do
+  for command_name in ocrmypdf tesseract pdftotext pdftoppm gs qpdf unpaper; do
     if command -v "$command_name" >/dev/null 2>&1; then
       printf '  [OK] %s: %s\n' "$command_name" "$(command -v "$command_name")"
     else

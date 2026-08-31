@@ -2,15 +2,55 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import os
+import re
 import signal
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from ..errors import OcrError
 from .base import OcrBackend
+
+
+ORIENTATION_ANCHORS = (
+    "medikationsplan",
+    "wirkstoff",
+    "handelsname",
+    "stärke",
+    "einnahme",
+    "morgens",
+    "mittags",
+    "abends",
+    "tabletten",
+    "patient",
+    "arzt",
+    "datum",
+)
+
+
+@dataclass(frozen=True)
+class OrientationDecision:
+    page: int
+    rotation: str
+    confidence: Optional[float]
+    method: str
+    status: str
+    scores: Optional[dict[str, Any]] = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "page": self.page,
+            "rotation": self.rotation,
+            "confidence": self.confidence,
+            "method": self.method,
+            "status": self.status,
+            "scores": self.scores,
+        }
 
 
 class _Result:
@@ -53,13 +93,18 @@ class OcrmypdfBackend(OcrBackend):
         *,
         ocrmypdf: str = "ocrmypdf",
         pdftotext: str = "pdftotext",
+        pdftoppm: str = "pdftoppm",
         qpdf: str = "qpdf",
+        tesseract: str = "tesseract",
         language: str = "deu+eng",
         jobs: int = 2,
         timeout: float = 1800.0,
         tesseract_timeout: float = 300.0,
         rotate_pages_threshold: float = 14.0,
         forced_page_rotations: Sequence[tuple[int, str]] = (),
+        auto_orient_pages: bool = True,
+        orientation_min_confidence: float = 5.0,
+        progress: Optional[Callable[[str], None]] = None,
     ) -> None:
         if jobs < 1:
             raise ValueError("OCR-Jobs muss mindestens 1 sein")
@@ -69,18 +114,26 @@ class OcrmypdfBackend(OcrBackend):
             raise ValueError("OCR-Sprache darf nicht leer sein")
         if rotate_pages_threshold < 0:
             raise ValueError("OCR-Drehschwelle darf nicht negativ sein")
+        if orientation_min_confidence < 0:
+            raise ValueError("Orientierungsschwelle darf nicht negativ sein")
         for page, angle in forced_page_rotations:
             if page < 1 or angle not in {"+90", "-90", "+180", "-180", "+270", "-270"}:
                 raise ValueError("Ungültige erzwungene Seitendrehung")
         self._ocrmypdf = ocrmypdf
         self._pdftotext = pdftotext
+        self._pdftoppm = pdftoppm
         self._qpdf = qpdf
+        self._tesseract = tesseract
         self._language = language
         self._jobs = jobs
         self._timeout = timeout
         self._tesseract_timeout = tesseract_timeout
         self._rotate_pages_threshold = rotate_pages_threshold
         self._forced_page_rotations = tuple(forced_page_rotations)
+        self._auto_orient_pages = auto_orient_pages
+        self._orientation_min_confidence = orientation_min_confidence
+        self._progress = progress or (lambda message: None)
+        self._last_orientation_decisions: list[OrientationDecision] = []
         self._mode_args: Optional[tuple[str, ...]] = None
 
     def _detect_mode_args(self) -> tuple[str, ...]:
@@ -100,7 +153,360 @@ class OcrmypdfBackend(OcrBackend):
         lines = stderr.decode("utf-8", "replace").strip().splitlines()
         return lines[-1][:1000] if lines else ""
 
+    @staticmethod
+    def _parse_osd(result: _Result) -> tuple[int, float]:
+        text = (result.stdout + result.stderr).decode("utf-8", "replace")
+        rotate_match = re.search(r"(?m)^Rotate:\s*(0|90|180|270)\s*$", text)
+        confidence_match = re.search(
+            r"(?m)^Orientation confidence:\s*([-+]?[0-9]+(?:[.,][0-9]+)?)\s*$",
+            text,
+        )
+        if rotate_match is None or confidence_match is None:
+            raise ValueError("Tesseract-OSD-Ausgabe ist unvollständig")
+        return (
+            int(rotate_match.group(1)),
+            float(confidence_match.group(1).replace(",", ".")),
+        )
+
+    @staticmethod
+    def _score_tsv(raw: bytes) -> dict[str, Any]:
+        text = raw.decode("utf-8", "replace")
+        words: list[str] = []
+        confidences: list[float] = []
+        try:
+            rows = csv.DictReader(io.StringIO(text), delimiter="\t")
+            for row in rows:
+                word = (row.get("text") or "").strip()
+                if not word:
+                    continue
+                try:
+                    confidence = float((row.get("conf") or "-1").replace(",", "."))
+                except ValueError:
+                    continue
+                if confidence < 0:
+                    continue
+                words.append(word)
+                confidences.append(confidence)
+        except csv.Error:
+            words = []
+            confidences = []
+
+        joined = " ".join(words).casefold()
+        anchors = [anchor for anchor in ORIENTATION_ANCHORS if anchor in joined]
+        plausible = [
+            word
+            for word in words
+            if len(re.findall(r"[^\W\d_]", word, flags=re.UNICODE)) >= 2
+        ]
+        mean_confidence = (
+            sum(confidences) / len(confidences) if confidences else 0.0
+        )
+        plausible_ratio = len(plausible) / len(words) if words else 0.0
+        score = (
+            mean_confidence
+            + min(len(words), 100) * 0.12
+            + plausible_ratio * 10.0
+            + len(anchors) * 12.0
+        )
+        return {
+            "score": round(score, 2),
+            "meanConfidence": round(mean_confidence, 2),
+            "words": len(words),
+            "anchors": anchors,
+        }
+
+    @staticmethod
+    def _rotation_value(angle: int) -> str:
+        return "0" if angle == 0 else f"+{angle}"
+
+    @staticmethod
+    def _page_number(path: Path) -> int:
+        match = re.search(r"-([0-9]+)\.png$", path.name)
+        if match is None:
+            raise OcrError(f"Seitennummer aus Rasterdatei nicht lesbar: {path.name}")
+        return int(match.group(1))
+
+    def _render_all_pages(self, path: Path, tmp: Path) -> dict[int, Path]:
+        prefix = tmp / "orientation-page"
+        result = _run(
+            [
+                self._pdftoppm,
+                "-png",
+                "-gray",
+                "-r",
+                "150",
+                str(path),
+                str(prefix),
+            ],
+            timeout=self._timeout,
+        )
+        if result.returncode != 0:
+            detail = self._last_error(result.stderr)
+            suffix = f": {detail}" if detail else ""
+            raise OcrError(
+                f"pdftoppm-Orientierungsprüfung endete mit Status {result.returncode}{suffix}"
+            )
+        pages = {
+            self._page_number(image): image
+            for image in sorted(tmp.glob("orientation-page-*.png"))
+        }
+        if not pages:
+            raise OcrError("pdftoppm erzeugte keine Seitenbilder")
+        return pages
+
+    def _candidate_image(
+        self,
+        source_pdf: Path,
+        original_image: Path,
+        page: int,
+        angle: int,
+        tmp: Path,
+    ) -> Path:
+        if angle == 0:
+            return original_image
+        candidate_pdf = tmp / f"orientation-{page}-{angle}.pdf"
+        rotate_result = _run(
+            [
+                self._qpdf,
+                str(source_pdf),
+                str(candidate_pdf),
+                f"--rotate=+{angle}:{page}",
+                "--flatten-rotation",
+            ],
+            timeout=self._timeout,
+        )
+        if rotate_result.returncode != 0:
+            raise OcrError(
+                f"qpdf-Kandidat Seite {page} / {angle}° fehlgeschlagen"
+            )
+        prefix = tmp / f"orientation-{page}-{angle}"
+        render_result = _run(
+            [
+                self._pdftoppm,
+                "-f",
+                str(page),
+                "-l",
+                str(page),
+                "-singlefile",
+                "-png",
+                "-gray",
+                "-r",
+                "150",
+                str(candidate_pdf),
+                str(prefix),
+            ],
+            timeout=self._timeout,
+        )
+        image = prefix.with_suffix(".png")
+        if render_result.returncode != 0 or not image.is_file():
+            raise OcrError(
+                f"pdftoppm-Kandidat Seite {page} / {angle}° fehlgeschlagen"
+            )
+        return image
+
+    def _four_way_decision(
+        self,
+        source_pdf: Path,
+        original_image: Path,
+        page: int,
+        osd_confidence: Optional[float],
+        tmp: Path,
+    ) -> OrientationDecision:
+        candidate_scores: dict[str, Any] = {}
+        for angle in (0, 90, 180, 270):
+            image = self._candidate_image(
+                source_pdf, original_image, page, angle, tmp
+            )
+            result = _run(
+                [
+                    self._tesseract,
+                    str(image),
+                    "stdout",
+                    "-l",
+                    self._language,
+                    "--psm",
+                    "3",
+                    "tsv",
+                ],
+                timeout=min(self._tesseract_timeout, self._timeout),
+            )
+            score = self._score_tsv(result.stdout) if result.returncode == 0 else {
+                "score": 0.0,
+                "meanConfidence": 0.0,
+                "words": 0,
+                "anchors": [],
+            }
+            candidate_scores[str(angle)] = score
+
+        ranked = sorted(
+            ((details["score"], int(angle)) for angle, details in candidate_scores.items()),
+            reverse=True,
+        )
+        best_score, best_angle = ranked[0]
+        second_score = ranked[1][0]
+        margin = best_score - second_score
+        score_details = {
+            "candidates": candidate_scores,
+            "margin": round(margin, 2),
+        }
+        if best_score >= 25.0 and margin >= 4.0:
+            return OrientationDecision(
+                page=page,
+                rotation=self._rotation_value(best_angle),
+                confidence=osd_confidence,
+                method="four_way",
+                status="rotated" if best_angle else "kept",
+                scores=score_details,
+            )
+        return OrientationDecision(
+            page=page,
+            rotation="0",
+            confidence=osd_confidence,
+            method="four_way",
+            status="uncertain",
+            scores=score_details,
+        )
+
+    def analyze_page_orientations(
+        self, path: Path, tmp: Path
+    ) -> list[OrientationDecision]:
+        manual = {
+            page: angle for page, angle in self._forced_page_rotations
+        }
+        if not self._auto_orient_pages:
+            return [
+                OrientationDecision(
+                    page=page,
+                    rotation=angle,
+                    confidence=None,
+                    method="manual",
+                    status="rotated",
+                )
+                for page, angle in sorted(manual.items())
+            ]
+
+        pages = self._render_all_pages(path, tmp)
+        missing_manual_pages = sorted(set(manual) - set(pages))
+        if missing_manual_pages:
+            raise OcrError(
+                "Erzwungene Drehung verweist auf nicht vorhandene Seite(n): "
+                + ", ".join(str(page) for page in missing_manual_pages)
+            )
+        self._progress(f"Orientierungsprüfung: {len(pages)} Seite(n)")
+        decisions: list[OrientationDecision] = []
+        for page, image in sorted(pages.items()):
+            if page in manual:
+                decision = OrientationDecision(
+                    page=page,
+                    rotation=manual[page],
+                    confidence=None,
+                    method="manual",
+                    status="rotated",
+                )
+            else:
+                osd_result = _run(
+                    [
+                        self._tesseract,
+                        str(image),
+                        "stdout",
+                        "-l",
+                        "osd",
+                        "--psm",
+                        "0",
+                    ],
+                    timeout=min(self._tesseract_timeout, self._timeout),
+                )
+                osd_rotation: Optional[int] = None
+                osd_confidence: Optional[float] = None
+                if osd_result.returncode == 0:
+                    try:
+                        osd_rotation, osd_confidence = self._parse_osd(osd_result)
+                    except ValueError:
+                        pass
+                if (
+                    osd_rotation is not None
+                    and osd_confidence is not None
+                    and osd_confidence >= self._orientation_min_confidence
+                ):
+                    decision = OrientationDecision(
+                        page=page,
+                        rotation=self._rotation_value(osd_rotation),
+                        confidence=round(osd_confidence, 2),
+                        method="osd",
+                        status="rotated" if osd_rotation else "kept",
+                    )
+                else:
+                    decision = self._four_way_decision(
+                        path,
+                        image,
+                        page,
+                        osd_confidence,
+                        tmp,
+                    )
+            decisions.append(decision)
+            if decision.method == "manual":
+                self._progress(
+                    f"Orientierung Seite {page}: manuell {decision.rotation}°"
+                )
+            elif decision.status == "uncertain":
+                self._progress(
+                    f"Orientierung Seite {page}: unsicher, bleibt bei 0°"
+                )
+            else:
+                confidence = (
+                    f", Konfidenz {decision.confidence:g}"
+                    if decision.confidence is not None
+                    else ""
+                )
+                self._progress(
+                    f"Orientierung Seite {page}: {decision.rotation}° "
+                    f"({decision.method}{confidence})"
+                )
+        return decisions
+
+    def _prepare_ocr_input(self, path: Path, tmp: Path) -> Path:
+        decisions = self.analyze_page_orientations(path, tmp)
+        self._last_orientation_decisions = decisions
+        rotations = [
+            f"--rotate={decision.rotation}:{decision.page}"
+            for decision in decisions
+            if decision.rotation != "0"
+        ]
+        if not rotations:
+            return path
+        rotated_input = tmp / "oriented.pdf"
+        rotate_result = _run(
+            [
+                self._qpdf,
+                str(path),
+                str(rotated_input),
+                *rotations,
+                "--flatten-rotation",
+            ],
+            timeout=self._timeout,
+        )
+        if (
+            rotate_result.returncode != 0
+            or not rotated_input.is_file()
+            or rotated_input.stat().st_size == 0
+        ):
+            detail = self._last_error(rotate_result.stderr)
+            suffix = f": {detail}" if detail else ""
+            raise OcrError(
+                "qpdf-Seitendrehung endete mit Status "
+                f"{rotate_result.returncode}{suffix}"
+            )
+        return rotated_input
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "pageOrientations": [
+                decision.as_dict() for decision in self._last_orientation_decisions
+            ]
+        }
+
     def extract_text(self, path: Path, mime_type: str) -> str:
+        self._last_orientation_decisions = []
         if mime_type.split(";", 1)[0].strip().lower() not in {
             "application/pdf",
             "application/x-pdf",
@@ -108,35 +514,8 @@ class OcrmypdfBackend(OcrBackend):
             raise OcrError(f"OCRmyPDF-Backend unterstützt keinen MIME-Typ {mime_type}")
 
         with tempfile.TemporaryDirectory(prefix="kienzledoku-ocrmypdf-") as tmp:
-            ocr_input = path
-            if self._forced_page_rotations:
-                rotated_input = Path(tmp) / "forced-rotation.pdf"
-                rotate_args = [
-                    f"--rotate={angle}:{page}"
-                    for page, angle in self._forced_page_rotations
-                ]
-                rotate_result = _run(
-                    [
-                        self._qpdf,
-                        str(path),
-                        str(rotated_input),
-                        *rotate_args,
-                        "--flatten-rotation",
-                    ],
-                    timeout=self._timeout,
-                )
-                if (
-                    rotate_result.returncode != 0
-                    or not rotated_input.is_file()
-                    or rotated_input.stat().st_size == 0
-                ):
-                    detail = self._last_error(rotate_result.stderr)
-                    suffix = f": {detail}" if detail else ""
-                    raise OcrError(
-                        "qpdf-Seitendrehung endete mit Status "
-                        f"{rotate_result.returncode}{suffix}"
-                    )
-                ocr_input = rotated_input
+            tmp_path = Path(tmp)
+            ocr_input = self._prepare_ocr_input(path, tmp_path)
 
             output_pdf = Path(tmp) / "ocr.pdf"
             command = [

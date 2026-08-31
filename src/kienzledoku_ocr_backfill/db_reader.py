@@ -27,6 +27,26 @@ COPY (
     WITH inventory AS (
         SELECT DISTINCT ON (v.objectid)
             p.nummer::text AS patientennummer,
+            COALESCE(
+                NULLIF(
+                    BTRIM(
+                        CONCAT_WS(
+                            ' ',
+                            COALESCE(
+                                NULLIF(to_jsonb(p) ->> 'vorname', ''),
+                                NULLIF(to_jsonb(p) ->> 'vornamen', '')
+                            ),
+                            COALESCE(
+                                NULLIF(to_jsonb(p) ->> 'nachname', ''),
+                                NULLIF(to_jsonb(p) ->> 'familienname', '')
+                            )
+                        )
+                    ),
+                    ''
+                ),
+                NULLIF(to_jsonb(p) ->> 'name', ''),
+                ''
+            ) AS patientenname,
             v.objectid,
             v.revision,
             v.classid,
@@ -46,6 +66,7 @@ COPY (
     )
     SELECT
         patientennummer,
+        patientenname,
         objectid,
         revision,
         classid,
@@ -118,6 +139,7 @@ class DatabaseReader:
         for row in rows:
             item = InventoryItem(
                 patient_number=row["patientennummer"],
+                patient_name=(row.get("patientenname") or "").strip() or None,
                 object_id=row["objectid"],
                 revision=int(row["revision"]),
                 class_id=int(row["classid"]),
