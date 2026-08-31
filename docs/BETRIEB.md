@@ -39,11 +39,13 @@ Der Installer aktualisiert nur die APT-Paketlisten und installiert die benötigt
 
 ### PZN-Datenbank vorbereiten
 
-Vor einem BMP-Test die aktuelle BfArM-§31b-Datenbank erzeugen und danach deren
-Metadaten lesen:
+Die vollständige Referenzdatenbank-Lieferung beim BfArM über
+`Referenzdaten@bfarm.de` beziehen. Das gelieferte ZIP anschließend direkt
+importieren und danach die Metadaten lesen:
 
 ```bash
 python3 ./bfarm-pzn.py update \
+  --source-zip /pfad/zur/BfArM-Lieferung.zip \
   --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
 
 python3 ./bfarm-pzn.py info \

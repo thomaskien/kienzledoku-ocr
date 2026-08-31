@@ -4,7 +4,7 @@
 Standard-library only. Can be used as CLI or imported as a module.
 
 CLI examples:
-    python3 bfarm_pzn.py update --db bfarm_pzn.sqlite
+    python3 bfarm_pzn.py update --source-zip BfArM-Lieferung.zip --db bfarm_pzn.sqlite
     python3 bfarm_pzn.py lookup 09322739 09531845 --db bfarm_pzn.sqlite
 
 Integration example:
@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 DEFAULT_DB = "bfarm_pzn.sqlite"
 DEFAULT_PAGE_URLS = (
@@ -172,8 +172,11 @@ def discover_latest_release(page_urls: Sequence[str] | None = None, timeout: flo
 
     raise DownloadError(
         "Die aktuelle BfArM-Lieferung konnte nicht automatisch ermittelt werden. "
-        "Du kannst stattdessen --source-dir mit drei bereits geladenen DSV-Dateien "
-        "oder die drei --*-url Optionen verwenden. Details: " + " | ".join(errors)
+        "Das BfArM veröffentlicht auf seiner Referenzdatenbank-Seite keine "
+        "direkten DSV-Downloadlinks, sondern stellt die vollständige ZIP-Lieferung "
+        "nach Kontaktaufnahme über Referenzdaten@bfarm.de bereit. Importiere diese "
+        "Datei mit --source-zip; alternativ sind --source-dir oder die drei "
+        "--*-url Optionen möglich. Details: " + " | ".join(errors)
     )
 
 
@@ -237,6 +240,63 @@ def find_release_files(source_dir: str | os.PathLike[str]) -> tuple[str, dict[st
         )
     newest = max(complete)
     return newest, {k: releases[newest][k] for k in KINDS}
+
+
+def extract_release_zip(
+    source_zip: str | os.PathLike[str], target_dir: str | os.PathLike[str]
+) -> tuple[str, dict[str, Path]]:
+    """Safely extract the newest complete DSV release from an official ZIP."""
+    source = Path(source_zip)
+    if not source.is_file():
+        raise FileNotFoundError(f"Keine ZIP-Datei: {source}")
+    target = Path(target_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    releases: dict[str, dict[str, zipfile.ZipInfo]] = {}
+    try:
+        with zipfile.ZipFile(source) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                filename = Path(member.filename).name
+                match = FILE_RE.fullmatch(filename)
+                if match is None:
+                    continue
+                date = match.group("date")
+                kind = match.group("kind").upper()
+                found = releases.setdefault(date, {})
+                if kind in found:
+                    raise ImportFormatError(
+                        f"{source.name}: DSV-Datei für {date}/{kind} ist mehrfach enthalten"
+                    )
+                found[kind] = member
+
+            complete = [
+                date
+                for date, members in releases.items()
+                if all(kind in members for kind in KINDS)
+            ]
+            if not complete:
+                raise ImportFormatError(
+                    f"{source.name}: keine vollständige Lieferung mit allen drei "
+                    "DSV-Dateien gefunden"
+                )
+            newest = max(complete)
+            result: dict[str, Path] = {}
+            for kind in KINDS:
+                member = releases[newest][kind]
+                destination = target / Path(member.filename).name
+                with archive.open(member) as input_file, destination.open(
+                    "xb"
+                ) as output_file:
+                    shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
+                result[kind] = destination
+    except zipfile.BadZipFile as exc:
+        raise ImportFormatError(f"Ungültige ZIP-Datei {source}: {exc}") from exc
+    except RuntimeError as exc:
+        raise ImportFormatError(
+            f"ZIP-Datei {source} konnte nicht gelesen werden: {exc}"
+        ) from exc
+    return newest, result
 
 
 def normalize_pzn(value: str | int) -> str:
@@ -599,17 +659,36 @@ def update_database(
     db_path: str | os.PathLike[str] = DEFAULT_DB,
     *,
     source_dir: str | os.PathLike[str] | None = None,
+    source_zip: str | os.PathLike[str] | None = None,
     page_url: str | None = None,
     explicit_urls: Mapping[str, str] | None = None,
     keep_downloads: str | os.PathLike[str] | None = None,
     timeout: float = 90.0,
 ) -> dict:
     """Download/import the newest BfArM release and return a status dict."""
+    if source_dir and source_zip:
+        raise ValueError("source_dir und source_zip können nicht kombiniert werden")
     if source_dir:
         release_date, files = find_release_files(source_dir)
-        urls = None
         counts = build_database(files, db_path, release_date=release_date)
-        return {"release_date": release_date, "db": str(db_path), "counts": counts, "downloaded": False}
+        return {
+            "release_date": release_date,
+            "db": str(db_path),
+            "counts": counts,
+            "downloaded": False,
+            "source": str(Path(source_dir)),
+        }
+    if source_zip:
+        with tempfile.TemporaryDirectory(prefix="bfarm-pzn-zip-") as tmpdir:
+            release_date, files = extract_release_zip(source_zip, tmpdir)
+            counts = build_database(files, db_path, release_date=release_date)
+        return {
+            "release_date": release_date,
+            "db": str(db_path),
+            "counts": counts,
+            "downloaded": False,
+            "source": str(Path(source_zip)),
+        }
 
     release = (
         _release_from_explicit_urls(explicit_urls)
@@ -647,13 +726,25 @@ def _print_human(drug: dict | None, requested: str) -> None:
 
 
 def _main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="BfArM §31b PZN-Downloader und lokaler SQLite-Auflöser")
+    parser = argparse.ArgumentParser(
+        description="BfArM-§31b-Lieferung importieren und PZN lokal auflösen"
+    )
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_update = sub.add_parser("update", help="Aktuelle BfArM-Daten laden und SQLite-Datenbank bauen")
+    p_update = sub.add_parser(
+        "update", help="BfArM-Lieferung importieren und SQLite-Datenbank bauen"
+    )
     p_update.add_argument("--db", default=DEFAULT_DB, help=f"SQLite-Zieldatei (Standard: {DEFAULT_DB})")
-    p_update.add_argument("--source-dir", help="Statt Download: Verzeichnis mit den drei DSV-Dateien importieren")
+    source = p_update.add_mutually_exclusive_group()
+    source.add_argument(
+        "--source-zip",
+        help="Vom BfArM gelieferte ZIP-Datei mit den drei DSV-Dateien importieren",
+    )
+    source.add_argument(
+        "--source-dir",
+        help="Statt Download: Verzeichnis mit den drei DSV-Dateien importieren",
+    )
     p_update.add_argument("--page-url", help="Abweichende BfArM-Seite für Auto-Discovery")
     p_update.add_argument("--medicinal-url", help="Explizite URL für REFERENCE_MEDICINAL_PRODUCT")
     p_update.add_argument("--pharmaceutical-url", help="Explizite URL für REFERENCE_PHARMACEUTICAL_PRODUCT")
@@ -686,6 +777,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
             result = update_database(
                 args.db,
                 source_dir=args.source_dir,
+                source_zip=args.source_zip,
                 page_url=args.page_url,
                 explicit_urls=explicit,
                 keep_downloads=args.keep_downloads,

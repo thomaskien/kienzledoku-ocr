@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.1 – 31.08.2026
+
+- BfArM-Bezugsweg korrigiert: Die vollständigen Referenzdaten werden nicht als
+  öffentliche DSV-Links angeboten, sondern vom BfArM als ZIP bereitgestellt
+- Direkter und pfadsicherer Import der offiziellen Lieferung mit
+  `bfarm-pzn.py update --source-zip DATEI.zip`
+- Fehlermeldung nennt den offiziellen Kontakt `Referenzdaten@bfarm.de` und
+  unterscheidet die Datenlieferung eindeutig vom Resolver-Programmarchiv
+
 ## 1.4 – 31.08.2026
 
 - Generische, importierbare QR-/Data-Matrix-Erkennung für PDF, PNG, JPEG und

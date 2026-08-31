@@ -3,14 +3,18 @@ import json
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
 from kienzledoku_ocr_backfill.bfarm_pzn import (
+    ImportFormatError,
     PZNResolver,
     build_database,
+    extract_release_zip,
     find_release_files,
     normalize_pzn,
+    update_database,
 )
 from kienzledoku_ocr_backfill.bmp import BmpParseError, format_bmp, parse_bmp
 from kienzledoku_ocr_backfill.medication_plans import MedicationPlanScan, MedicationPlanScanner
@@ -135,6 +139,35 @@ class PznResolverTests(unittest.TestCase):
                 self.assertEqual(drug["name"], "Testmed 10 mg")
                 self.assertEqual(drug["substances"][0]["name"], "Teststoff")
                 self.assertEqual(resolver.metadata()["release_date"], release)
+
+    def test_official_delivery_zip_can_be_imported_directly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            self._write_source(source)
+            archive_path = root / "bfarm-lieferung.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                for path in source.iterdir():
+                    archive.write(path, arcname=f"Lieferung/{path.name}")
+
+            database = root / "bfarm.sqlite"
+            result = update_database(database, source_zip=archive_path)
+
+            self.assertEqual(result["release_date"], "20260815")
+            self.assertEqual(result["counts"]["products"], 1)
+            self.assertEqual(result["source"], str(archive_path))
+            with PZNResolver(database) as resolver:
+                self.assertEqual(resolver.lookup("9322739")["name"], "Testmed 10 mg")
+
+    def test_non_delivery_zip_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "resolver.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("README.md", "kein Datenexport")
+            with self.assertRaisesRegex(ImportFormatError, "keine vollständige Lieferung"):
+                extract_release_zip(archive_path, root / "extracted")
 
 
 class QrExtractorTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.4 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
+Version 1.4.1 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -53,10 +53,18 @@ markierten, menschenlesbaren Text. Andere Seiten desselben Dokuments durchlaufen
 unverändert die normale OCR. Arzneimittelnamen, Wirkstoffe und Stärken werden
 anhand der PZN aus einer lokalen BfArM-§31b-SQLite-Datenbank ergänzt.
 
-Die Datenbank vor dem ersten Lauf und später nach Bedarf aktualisieren:
+Das BfArM veröffentlicht die vollständigen Referenzdaten nicht als frei
+ermittelbare DSV-Links. Nach Auskunft auf der offiziellen Referenzdatenbank-Seite
+wird die ZIP-Lieferung nach Kontaktaufnahme über `Referenzdaten@bfarm.de`
+bereitgestellt. Das Archiv `bfarm_pzn_resolver_*.zip` ist nur der Programmcode
+und keine solche Datenlieferung.
+
+Die erhaltene BfArM-ZIP-Datei vor dem ersten Lauf und später nach Bedarf direkt
+importieren:
 
 ```bash
 python3 ./bfarm-pzn.py update \
+  --source-zip /pfad/zur/BfArM-Lieferung.zip \
   --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
 
 python3 ./bfarm-pzn.py info \
@@ -244,7 +252,7 @@ Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
 ----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.4, 31.08.2026 14:55
+kienzledoku OCR v1.4.1, 31.08.2026 14:55
 ----- ENDE kienzledoku OCR -----
 ```
 

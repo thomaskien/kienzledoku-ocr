@@ -35,10 +35,12 @@ ursprünglicher Seitenreihenfolge verbunden.
 
 Der gelieferte BfArM-Downloader ist als `bfarm-pzn.py` eingebunden. Er erzeugt
 die SQLite-Datei atomar; die OCR-Pipeline öffnet sie im SQLite-Modus `mode=ro`.
-Die Datenbank ist vor dem ersten BMP-Lauf anzulegen:
+Die Datenbank ist vor dem ersten BMP-Lauf aus der vom BfArM bereitgestellten
+ZIP-Lieferung anzulegen:
 
 ```bash
 python3 ./bfarm-pzn.py update \
+  --source-zip /pfad/zur/BfArM-Lieferung.zip \
   --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
 ```
 
