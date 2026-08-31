@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.3 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises.
+Version 1.4 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -17,17 +17,19 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - Ein Dokumentfehler wird journalisiert; anschließend läuft der Batch mit dem nächsten Dokument weiter.
 - Bereits vorhandene Marker `kienzledoku OCR v…` verhindern standardmäßig Doppelanhänge.
 - Version 1.1 grenzt jeden neuen OCR-Anteil mit festen BEGINN-/ENDE-Markern ab. `--reprocess` ersetzt den Block gezielt, statt ihn erneut anzuhängen.
-- Version 1.3 prüft die Orientierung jeder PDF-Seite vor OCR, dreht nur eine temporäre Arbeitskopie und journalisiert die Entscheidung.
+- Seit Version 1.3 wird die Orientierung jeder PDF-Seite vor OCR geprüft; nur eine temporäre Arbeitskopie wird gedreht und die Entscheidung journalisiert.
+- Version 1.4 liest BMP-Data-Matrix und PZN-Daten ausschließlich lokal; die Data-Matrix-Rohdaten werden nicht in das Journal geschrieben.
 - Schreibvorgänge laufen bewusst nicht parallel.
 
 `classid = 59` (Bildeinträge) ist nicht freigeschaltet. Dafür muss zuerst der eigene APS-Adapter end-to-end bestätigt werden. `--limit` wird erst nach der Dateiinfo-Prüfung angewendet und zählt damit tatsächliche PDF-Kandidaten; andere `classid-60`-Dateitypen verbrauchen das Limit nicht.
 
 ## Voraussetzungen
 
-- Python 3.9 oder neuer
+- Python 3.10 oder neuer
 - lokaler Lesezugriff über T2meds `psql`, standardmäßig `/opt/t2med/server/postgres/bin/psql`
 - T2med-Benutzer für APS und CDN
 - `ocrmypdf`, Tesseract mit `deu`/`eng`/`osd`, `pdftotext`, `pdftoppm`, Ghostscript, qpdf und unpaper
+- Pillow und ZXing-C++ (`python3-pil`, `python3-zxing-cpp`) für Data Matrix
 
 Das Standardbackend entspricht der bestätigten KienzleFax-Pipeline: OCRmyPDF/Tesseract mit `deu+eng`, OEM 1, Seitendrehung, Entzerrung, Reinigung, 300-dpi-Oversampling, PDF/A-3, Optimierung 1, 300 Sekunden Tesseract-Zeitlimit je Seite und zwei internen Jobs. Davor prüft Version 1.3 jede Seite mit Tesseract OSD. Ist die Lage nicht eindeutig, werden 0°, 90°, 180° und 270° anhand eines kurzen OCR-Laufs verglichen. Nur eine ausreichend deutliche Entscheidung wird auf die temporäre Arbeitskopie angewandt. Seiten ohne Textschicht werden durch Tesseract erkannt; bei Seiten mit vorhandenem PDF-Text bleibt dieser erhalten und wird nicht unnötig erneut OCR-erkannt. Anschließend liest `pdftotext` den vorhandenen und den neu erkannten Text gemeinsam und ohne Steuerzeichen für Seitenumbrüche aus dem temporären OCR-PDF. Diese Arbeitsdateien werden verworfen; die T2med-CDN-Datei wird nicht verändert.
 
@@ -37,10 +39,49 @@ Auf Debian/Raspberry Pi OS werden dieselben Pakete wie bei KienzleFax benötigt:
 sudo ./scripts/install-ocr-dependencies.sh
 ```
 
-Der Installer verwendet ausschließlich `apt-get`, führt kein Distributions-Upgrade aus und prüft danach Programme, OCRmyPDF-Optionen sowie die Tesseract-Sprachen `deu`, `eng` und `osd`. Eine rein lesende Prüfung ist ebenfalls möglich:
+Der Installer verwendet ausschließlich `apt-get`, führt kein Distributions-Upgrade aus und prüft danach Programme, OCRmyPDF-Optionen, Pillow/ZXing-C++ sowie die Tesseract-Sprachen `deu`, `eng` und `osd`. Eine rein lesende Prüfung ist ebenfalls möglich:
 
 ```bash
 ./scripts/install-ocr-dependencies.sh --check
+```
+
+## Bundesmedikationsplan und PZN-Datenbank
+
+Der bundeseinheitliche Medikationsplan enthält eine Data Matrix. Version 1.4
+liest deren BMP-XML ohne OCR und ersetzt nur diese PDF-Seite durch einen klar
+markierten, menschenlesbaren Text. Andere Seiten desselben Dokuments durchlaufen
+unverändert die normale OCR. Arzneimittelnamen, Wirkstoffe und Stärken werden
+anhand der PZN aus einer lokalen BfArM-§31b-SQLite-Datenbank ergänzt.
+
+Die Datenbank vor dem ersten Lauf und später nach Bedarf aktualisieren:
+
+```bash
+python3 ./bfarm-pzn.py update \
+  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
+
+python3 ./bfarm-pzn.py info \
+  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
+```
+
+Eine einzelne PZN lässt sich kontrollieren:
+
+```bash
+python3 ./bfarm-pzn.py lookup 09322739 \
+  --db /var/lib/kienzledoku-ocr/bfarm_pzn.sqlite
+```
+
+Fehlt die Datenbank bei einem PZN-basierten Plan, meldet das Programm dies und
+lässt die Seite sicher in der normalen OCR. Der Pfad ist mit `--pzn-db`
+einstellbar. Die Erkennung arbeitet standardmäßig mit 300 dpi und versucht eine
+nicht erkannte Seite erneut mit 600 dpi (`--barcode-dpi` und
+`--barcode-retry-dpi`). `--no-medication-plan-codes` deaktiviert diese Funktion.
+
+Der unabhängige, fachlich neutrale Extraktor unterstützt PDF, PNG, JPEG und
+mehrseitiges TIFF. Er gibt Rohdaten, UTF-8-Text soweit möglich, Base64, Seite und
+Position als JSON aus:
+
+```bash
+python3 ./qr-extractor.py scan.pdf
 ```
 
 ## OCR-Backend
@@ -66,7 +107,7 @@ Vierfachvergleich. `--rotate-pages-threshold` bleibt als nachgelagerte
 OCRmyPDF-Sicherung erhalten. Für Diagnosezwecke kann die neue Vorprüfung mit
 `--no-auto-orient-pages` deaktiviert werden.
 
-Bei einem seitlich eingescannten, tabellarischen Dokument genügt mit Version
+Bei einem seitlich eingescannten, tabellarischen Dokument genügt seit Version
 1.3 normalerweise ein gezielter Neu-Lauf ohne manuelle Drehangabe:
 
 ```bash
@@ -203,8 +244,23 @@ Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
 ----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.3, 31.08.2026 14:55
+kienzledoku OCR v1.4, 31.08.2026 14:55
 ----- ENDE kienzledoku OCR -----
+```
+
+Eine erkannte BMP-Seite erscheint innerhalb dieses Blocks beispielsweise so:
+
+```text
+----- BEGINN BUNDESMEDIKATIONSPLAN -----
+BUNDESMEDIKATIONSPLAN für Erika Muster, Geburtsdatum: 01.01.1975
+Ausstellungsdatum: 24.01.2026 13:35
+Ausgestellt durch: Dr. Beispiel
+
+Überschrift: Dauermedikation
+## Nr	| Medikament	| Dosis	| Einnahme
+1	| Ramipril	| 5 mg, Tablette	| 1-0-0-0 Stück
+	Kommentar: PZN 01234567
+----- ENDE BUNDESMEDIKATIONSPLAN -----
 ```
 
 Die Footerzeit wird immer in `Europe/Berlin` erzeugt.
@@ -244,6 +300,8 @@ Zurückgesetzt werden ausschließlich zuvor vollständig verifizierte `updated`-
 - `2`: Batch beendet, mindestens ein Dokument hatte einen Fehler oder Rollback-Konflikt
 - `130`: interaktiv abgebrochen
 
-Die genaue Fortschrittsausgabe und Orientierungsentscheidung beschreibt
-[docs/VERSION-1.3.md](docs/VERSION-1.3.md). Weitere praktische Prüfschritte
+Die Neuerungen für Data Matrix und Medikationspläne beschreibt
+[docs/VERSION-1.4.md](docs/VERSION-1.4.md). Die Fortschrittsausgabe und
+Orientierungsentscheidung steht in [docs/VERSION-1.3.md](docs/VERSION-1.3.md).
+Weitere praktische Prüfschritte
 stehen in [docs/BETRIEB.md](docs/BETRIEB.md).

@@ -28,7 +28,7 @@ class DependencyInstallerTests(unittest.TestCase):
             ocrmypdf.write_text(
                 "#!/usr/bin/env bash\n"
                 "if [[ ${1:-} == --help ]]; then\n"
-                "  echo '--mode --rotate-pages --rotate-pages-threshold --deskew --clean --oversample --output-type --optimize --tesseract-timeout --jobs'\n"
+                "  echo '--mode --pages --rotate-pages --rotate-pages-threshold --deskew --clean --oversample --output-type --optimize --tesseract-timeout --jobs'\n"
                 "else\n"
                 "  echo 'ocrmypdf test'\n"
                 "fi\n",
@@ -47,6 +47,15 @@ class DependencyInstallerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             tesseract.chmod(0o755)
+
+            python3 = bin_dir / "python3"
+            python3.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ ${1:-} == -c ]]; then exit 0; fi\n"
+                "exec /usr/bin/python3 \"$@\"\n",
+                encoding="utf-8",
+            )
+            python3.chmod(0o755)
 
             for name in ("pdftotext", "pdftoppm", "gs", "qpdf", "unpaper"):
                 stub = bin_dir / name
@@ -82,12 +91,15 @@ class DependencyInstallerTests(unittest.TestCase):
     def test_required_packages_are_explicit(self):
         text = INSTALLER.read_text(encoding="utf-8")
         for package in (
+            "python3",
             "ocrmypdf",
             "tesseract-ocr",
             "tesseract-ocr-deu",
             "tesseract-ocr-eng",
             "tesseract-ocr-osd",
             "poppler-utils",
+            "python3-pil",
+            "python3-zxing-cpp",
             "ghostscript",
             "qpdf",
             "unpaper",

@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.3"
+VERSION="1.4"
 
 readonly PACKAGES=(
+  python3
   ocrmypdf
   tesseract-ocr
   tesseract-ocr-deu
   tesseract-ocr-eng
   tesseract-ocr-osd
   poppler-utils
+  python3-pil
+  python3-zxing-cpp
   ghostscript
   qpdf
   unpaper
@@ -24,8 +27,8 @@ Verwendung:
   ./scripts/install-ocr-dependencies.sh --check
   ./scripts/install-ocr-dependencies.sh --help
 
-Ohne Option werden die bestätigten OCRmyPDF-/Tesseract-Pakete über apt-get
-installiert. --check verändert das System nicht.
+Ohne Option werden OCRmyPDF/Tesseract sowie die Data-Matrix-Abhängigkeiten
+über apt-get installiert. --check verändert das System nicht.
 EOF
 }
 
@@ -37,7 +40,7 @@ verify_dependencies() {
   local required_option
 
   echo "Prüfe OCR-Programme ..."
-  for command_name in ocrmypdf tesseract pdftotext pdftoppm gs qpdf unpaper; do
+  for command_name in python3 ocrmypdf tesseract pdftotext pdftoppm gs qpdf unpaper; do
     if command -v "$command_name" >/dev/null 2>&1; then
       printf '  [OK] %s: %s\n' "$command_name" "$(command -v "$command_name")"
     else
@@ -56,6 +59,15 @@ verify_dependencies() {
         failed=1
       fi
     done
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    if python3 -c 'from PIL import Image; import zxingcpp; assert callable(zxingcpp.read_barcodes)' >/dev/null 2>&1; then
+      echo "  [OK] Python kann Pillow und zxingcpp laden (QR/Data Matrix)"
+    else
+      echo "  [FEHLT] Python-Module Pillow oder zxingcpp" >&2
+      failed=1
+    fi
   fi
 
   if command -v ocrmypdf >/dev/null 2>&1; then
@@ -81,6 +93,10 @@ verify_dependencies() {
         failed=1
       fi
     done
+    if [[ "$help_text" != *"--pages"* ]]; then
+      echo "  [FEHLT] OCRmyPDF-Option: --pages" >&2
+      failed=1
+    fi
   fi
 
   if command -v qpdf >/dev/null 2>&1; then
@@ -149,7 +165,7 @@ main() {
   echo "Aktualisiere Paketlisten ..."
   apt-get update
 
-  echo "Installiere bestätigten KienzleFax-OCR-Stack ..."
+  echo "Installiere KienzleFax-OCR- und Data-Matrix-Stack ..."
   export DEBIAN_FRONTEND=noninteractive
   apt-get install -y "${PACKAGES[@]}"
 

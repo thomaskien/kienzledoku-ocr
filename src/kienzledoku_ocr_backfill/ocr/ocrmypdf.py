@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 from ..errors import OcrError
+from ..medication_plans import MedicationPlanScan, MedicationPlanScanner
 from .base import OcrBackend
 
 
@@ -104,6 +105,10 @@ class OcrmypdfBackend(OcrBackend):
         forced_page_rotations: Sequence[tuple[int, str]] = (),
         auto_orient_pages: bool = True,
         orientation_min_confidence: float = 5.0,
+        medication_plan_codes: bool = True,
+        pzn_database: Optional[Path] = None,
+        barcode_dpi: int = 300,
+        barcode_retry_dpi: int = 600,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
         if jobs < 1:
@@ -116,6 +121,8 @@ class OcrmypdfBackend(OcrBackend):
             raise ValueError("OCR-Drehschwelle darf nicht negativ sein")
         if orientation_min_confidence < 0:
             raise ValueError("Orientierungsschwelle darf nicht negativ sein")
+        if barcode_dpi < 72 or barcode_retry_dpi < barcode_dpi:
+            raise ValueError("Ungültige Data-Matrix-Renderauflösung")
         for page, angle in forced_page_rotations:
             if page < 1 or angle not in {"+90", "-90", "+180", "-180", "+270", "-270"}:
                 raise ValueError("Ungültige erzwungene Seitendrehung")
@@ -132,8 +139,13 @@ class OcrmypdfBackend(OcrBackend):
         self._forced_page_rotations = tuple(forced_page_rotations)
         self._auto_orient_pages = auto_orient_pages
         self._orientation_min_confidence = orientation_min_confidence
+        self._medication_plan_codes = medication_plan_codes
+        self._pzn_database = pzn_database
+        self._barcode_dpi = barcode_dpi
+        self._barcode_retry_dpi = barcode_retry_dpi
         self._progress = progress or (lambda message: None)
         self._last_orientation_decisions: list[OrientationDecision] = []
+        self._last_medication_diagnostics: Optional[dict[str, Any]] = None
         self._mode_args: Optional[tuple[str, ...]] = None
 
     def _detect_mode_args(self) -> tuple[str, ...]:
@@ -502,11 +514,69 @@ class OcrmypdfBackend(OcrBackend):
         return {
             "pageOrientations": [
                 decision.as_dict() for decision in self._last_orientation_decisions
-            ]
+            ],
+            "medicationPlans": self._last_medication_diagnostics,
         }
+
+    def _scan_medication_plans(self, path: Path) -> MedicationPlanScan:
+        if not self._medication_plan_codes:
+            return MedicationPlanScan({}, 0, {"disabled": True})
+        scanner = MedicationPlanScanner(
+            pzn_database=self._pzn_database,
+            pdftoppm=self._pdftoppm,
+            dpi=self._barcode_dpi,
+            retry_dpi=self._barcode_retry_dpi,
+            timeout=min(self._tesseract_timeout, self._timeout),
+            progress=self._progress,
+        )
+        return scanner.scan(path)
+
+    def _extract_page_text(self, output_pdf: Path, page: int) -> str:
+        result = _run(
+            [
+                self._pdftotext,
+                "-f",
+                str(page),
+                "-l",
+                str(page),
+                "-enc",
+                "UTF-8",
+                "-nopgbrk",
+                str(output_pdf),
+                "-",
+            ],
+            timeout=self._timeout,
+        )
+        if result.returncode != 0:
+            detail = self._last_error(result.stderr)
+            suffix = f": {detail}" if detail else ""
+            raise OcrError(
+                f"pdftotext für Seite {page} endete mit Status "
+                f"{result.returncode}{suffix}"
+            )
+        try:
+            return result.stdout.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise OcrError(
+                f"pdftotext-Ausgabe für Seite {page} ist nicht UTF-8-kodiert"
+            ) from exc
+
+    def _mixed_text(
+        self, output_pdf: Path, medication_scan: MedicationPlanScan
+    ) -> str:
+        parts: list[str] = []
+        for page in range(1, medication_scan.page_count + 1):
+            if page in medication_scan.pages:
+                text = medication_scan.pages[page]
+            else:
+                text = self._extract_page_text(output_pdf, page)
+            if text:
+                parts.append(text)
+        return "\n\n".join(parts)
 
     def extract_text(self, path: Path, mime_type: str) -> str:
         self._last_orientation_decisions = []
+        self._last_medication_diagnostics = None
         if mime_type.split(";", 1)[0].strip().lower() not in {
             "application/pdf",
             "application/x-pdf",
@@ -516,6 +586,19 @@ class OcrmypdfBackend(OcrBackend):
         with tempfile.TemporaryDirectory(prefix="kienzledoku-ocrmypdf-") as tmp:
             tmp_path = Path(tmp)
             ocr_input = self._prepare_ocr_input(path, tmp_path)
+            medication_scan = self._scan_medication_plans(ocr_input)
+            self._last_medication_diagnostics = medication_scan.diagnostics
+            medication_pages = set(medication_scan.pages)
+            ocr_pages = [
+                page
+                for page in range(1, medication_scan.page_count + 1)
+                if page not in medication_pages
+            ]
+
+            if medication_pages and not ocr_pages:
+                return "\n\n".join(
+                    medication_scan.pages[page] for page in sorted(medication_pages)
+                )
 
             output_pdf = Path(tmp) / "ocr.pdf"
             command = [
@@ -540,9 +623,10 @@ class OcrmypdfBackend(OcrBackend):
                 f"{self._tesseract_timeout:g}",
                 "--jobs",
                 str(self._jobs),
-                str(ocr_input),
-                str(output_pdf),
             ]
+            if medication_pages:
+                command.extend(["--pages", ",".join(str(page) for page in ocr_pages)])
+            command.extend([str(ocr_input), str(output_pdf)])
             ocr_result = _run(command, timeout=self._timeout)
             if ocr_result.returncode != 0 or not output_pdf.is_file() or output_pdf.stat().st_size == 0:
                 detail = self._last_error(ocr_result.stderr)
@@ -550,6 +634,9 @@ class OcrmypdfBackend(OcrBackend):
                 raise OcrError(
                     f"OCRmyPDF endete mit Status {ocr_result.returncode}{suffix}"
                 )
+
+            if medication_pages:
+                return self._mixed_text(output_pdf, medication_scan)
 
             text_result = _run(
                 [

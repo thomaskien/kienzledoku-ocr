@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4 – 31.08.2026
+
+- Generische, importierbare QR-/Data-Matrix-Erkennung für PDF, PNG, JPEG und
+  mehrseitiges TIFF mit Rohbytes/Base64, Position, Seite und isolierten Fehlern
+- PDF-Erkennung zunächst mit 300 dpi und seitenweiser Wiederholung mit 600 dpi
+- BMP-Data-Matrix wird nach KBV-Schema als ISO-8859-1-XML gelesen; die
+  betroffene Seite wird nicht OCR-erkannt
+- Menschliche BMP-Ausgabe mit klarer BEGINN-/ENDE-Markierung, Patienten- und
+  Ausstellungsdaten sowie tabulatorbasierter Tabelle für T2med
+- Gelieferter BfArM-§31b-Downloader/PZN-Auflöser eingebunden; die erzeugte
+  SQLite-Datenbank wird von der OCR-Pipeline ausschließlich lesend geöffnet
+- Unveränderte OCR aller Nicht-BMP-Seiten; gemischte Dokumente werden in ihrer
+  ursprünglichen Seitenreihenfolge zusammengeführt
+- Installer ergänzt `python3-pil` und `python3-zxing-cpp` und prüft die
+  erforderliche OCRmyPDF-Option `--pages`
+- Eigenständige CLIs `qr-extractor.py` und `bfarm-pzn.py`
+
 ## 1.3 – 31.08.2026
 
 - Automatische seitenweise Orientierungsprüfung vor OCR: Tesseract OSD erkennt

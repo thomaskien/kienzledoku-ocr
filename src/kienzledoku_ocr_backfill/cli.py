@@ -170,6 +170,34 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Mindestkonfidenz für direkte Tesseract-OSD-Drehung; Standard 5",
     )
     parser.add_argument(
+        "--pzn-db",
+        type=Path,
+        default=Path("/var/lib/kienzledoku-ocr/bfarm_pzn.sqlite"),
+        help=(
+            "Lokale BfArM-PZN-Datenbank für Medikationspläne; Standard "
+            "/var/lib/kienzledoku-ocr/bfarm_pzn.sqlite"
+        ),
+    )
+    parser.add_argument(
+        "--no-medication-plan-codes",
+        dest="medication_plan_codes",
+        action="store_false",
+        default=True,
+        help="Data-Matrix-Erkennung für Medikationspläne deaktivieren",
+    )
+    parser.add_argument(
+        "--barcode-dpi",
+        type=_positive_int,
+        default=300,
+        help="PDF-Auflösung für Data-Matrix-Erkennung; Standard 300 dpi",
+    )
+    parser.add_argument(
+        "--barcode-retry-dpi",
+        type=_positive_int,
+        default=600,
+        help="Zweiter Data-Matrix-Versuch bei Nichterkennung; Standard 600 dpi",
+    )
+    parser.add_argument(
         "--tesseract-timeout",
         type=float,
         default=300.0,
@@ -268,6 +296,10 @@ def run(args: argparse.Namespace) -> int:
                     forced_page_rotations=args.force_rotate_page,
                     auto_orient_pages=args.auto_orient_pages,
                     orientation_min_confidence=args.orientation_confidence,
+                    medication_plan_codes=args.medication_plan_codes,
+                    pzn_database=args.pzn_db,
+                    barcode_dpi=args.barcode_dpi,
+                    barcode_retry_dpi=args.barcode_retry_dpi,
                     progress=print,
                 )
         except ValueError as exc:
