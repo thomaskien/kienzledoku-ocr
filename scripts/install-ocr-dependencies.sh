@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="1.00"
+
+readonly PACKAGES=(
+  ocrmypdf
+  tesseract-ocr
+  tesseract-ocr-deu
+  tesseract-ocr-eng
+  tesseract-ocr-osd
+  poppler-utils
+  ghostscript
+  qpdf
+  unpaper
+)
+
+usage() {
+  cat <<'EOF'
+KienzleDoku OCR-Abhängigkeiten installieren oder prüfen.
+
+Verwendung:
+  sudo ./scripts/install-ocr-dependencies.sh
+  ./scripts/install-ocr-dependencies.sh --check
+  ./scripts/install-ocr-dependencies.sh --help
+
+Ohne Option werden die bestätigten OCRmyPDF-/Tesseract-Pakete über apt-get
+installiert. --check verändert das System nicht.
+EOF
+}
+
+verify_dependencies() {
+  local failed=0
+  local command_name
+  local languages=""
+  local help_text=""
+  local required_option
+
+  echo "Prüfe OCR-Programme ..."
+  for command_name in ocrmypdf tesseract pdftotext gs qpdf unpaper; do
+    if command -v "$command_name" >/dev/null 2>&1; then
+      printf '  [OK] %s: %s\n' "$command_name" "$(command -v "$command_name")"
+    else
+      printf '  [FEHLT] %s\n' "$command_name" >&2
+      failed=1
+    fi
+  done
+
+  if command -v tesseract >/dev/null 2>&1; then
+    languages="$(tesseract --list-langs 2>&1 || true)"
+    for required_option in deu eng osd; do
+      if grep -Fxq "$required_option" <<<"$languages"; then
+        printf '  [OK] Tesseract-Sprache: %s\n' "$required_option"
+      else
+        printf '  [FEHLT] Tesseract-Sprache: %s\n' "$required_option" >&2
+        failed=1
+      fi
+    done
+  fi
+
+  if command -v ocrmypdf >/dev/null 2>&1; then
+    help_text="$(ocrmypdf --help 2>&1 || true)"
+    if [[ "$help_text" == *"--mode"* || "$help_text" == *"--skip-text"* ]]; then
+      echo "  [OK] OCRmyPDF kann vorhandene Textseiten beibehalten"
+    else
+      echo "  [FEHLT] OCRmyPDF unterstützt weder --mode noch --skip-text" >&2
+      failed=1
+    fi
+    for required_option in \
+      --rotate-pages \
+      --deskew \
+      --clean \
+      --oversample \
+      --output-type \
+      --optimize \
+      --tesseract-timeout \
+      --jobs; do
+      if [[ "$help_text" != *"$required_option"* ]]; then
+        printf '  [FEHLT] OCRmyPDF-Option: %s\n' "$required_option" >&2
+        failed=1
+      fi
+    done
+  fi
+
+  if (( failed != 0 )); then
+    echo "OCR-Abhängigkeiten sind nicht vollständig." >&2
+    return 1
+  fi
+
+  echo "OCR-Abhängigkeiten sind vollständig."
+  ocrmypdf --version
+  tesseract --version
+  pdftotext -v 2>&1
+  gs --version
+  qpdf --version
+  unpaper --version
+}
+
+main() {
+  local mode="install"
+
+  if (( $# > 1 )); then
+    usage >&2
+    return 2
+  fi
+  if (( $# == 1 )); then
+    case "$1" in
+      --check)
+        mode="check"
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "Unbekannte Option: $1" >&2
+        usage >&2
+        return 2
+        ;;
+    esac
+  fi
+
+  echo "KienzleDoku OCR-Abhängigkeiten v${VERSION}"
+  if [[ "$mode" == "check" ]]; then
+    verify_dependencies
+    return
+  fi
+
+  if (( EUID != 0 )); then
+    echo "Bitte als root ausführen, zum Beispiel mit sudo." >&2
+    return 1
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Dieser Installer unterstützt Debian/Ubuntu mit apt-get." >&2
+    return 1
+  fi
+
+  echo "Aktualisiere Paketlisten ..."
+  apt-get update
+
+  echo "Installiere bestätigten KienzleFax-OCR-Stack ..."
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y "${PACKAGES[@]}"
+
+  verify_dependencies
+}
+
+main "$@"

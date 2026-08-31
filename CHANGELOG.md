@@ -7,6 +7,7 @@
 - Bestätigte APS-find/update- und CDN-delivery-Wege
 - Bestätigtes KienzleFax-Standardbackend mit OCRmyPDF/Tesseract und `pdftotext`
 - Zusätzlich austauschbares, shell-freies OCR-Kommando-Backend
+- Kleiner idempotenter Debian/Ubuntu-Paketinstaller mit rein lesendem `--check`-Modus
 - Default-Dry-Run, Filter, Limit und Resume
 - Idempotenzmarker und Europe/Berlin-Footer
 - Fsync-gesichertes JSONL-Write-ahead-Journal

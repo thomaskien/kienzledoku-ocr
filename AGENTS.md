@@ -26,5 +26,6 @@ Vor Commit mindestens ausführen:
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
+bash -n scripts/install-ocr-dependencies.sh
 git diff --check
 ```

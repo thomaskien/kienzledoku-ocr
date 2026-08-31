@@ -31,9 +31,13 @@ Das Standardbackend entspricht der bestätigten KienzleFax-Pipeline: OCRmyPDF/Te
 Auf Debian/Raspberry Pi OS werden dieselben Pakete wie bei KienzleFax benötigt:
 
 ```bash
-sudo apt-get install \
-  ocrmypdf tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng \
-  poppler-utils ghostscript qpdf unpaper
+sudo ./scripts/install-ocr-dependencies.sh
+```
+
+Der Installer verwendet ausschließlich `apt-get`, führt kein Distributions-Upgrade aus und prüft danach Programme, OCRmyPDF-Optionen sowie die Tesseract-Sprachen `deu`, `eng` und `osd`. Eine rein lesende Prüfung ist ebenfalls möglich:
+
+```bash
+./scripts/install-ocr-dependencies.sh --check
 ```
 
 ## OCR-Backend

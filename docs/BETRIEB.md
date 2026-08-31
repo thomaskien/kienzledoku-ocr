@@ -18,14 +18,21 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 
 Die Tests verwenden ausschließlich Fakes und ändern weder T2med noch PostgreSQL.
 
-Abhängigkeiten auf dem T2med-Server prüfen:
+Abhängigkeiten auf einem Debian-/Ubuntu-T2med-Server installieren und prüfen:
 
 ```bash
-command -v ocrmypdf tesseract pdftotext gs qpdf unpaper
-tesseract --list-langs
+sudo ./scripts/install-ocr-dependencies.sh
+```
+
+Spätere rein lesende Prüfung:
+
+```bash
+./scripts/install-ocr-dependencies.sh --check
 ```
 
 Die Sprachliste muss mindestens `deu` und `eng` enthalten. Die Produktionspipeline verwendet dieselben OCRmyPDF-Parameter wie KienzleFax: Seiten ohne Textschicht werden OCR-erkannt, vorhandener PDF-Text wird beibehalten. Danach gewinnt `pdftotext -enc UTF-8 -nopgbrk` den vorhandenen und den neu erkannten Text gemeinsam.
+
+Der Installer aktualisiert nur die APT-Paketlisten und installiert die benötigten Pakete. Er führt bewusst kein `apt-get upgrade` aus.
 
 ## 3. Testobjekt `test5.pdf`
 
