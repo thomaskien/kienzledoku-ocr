@@ -8,6 +8,7 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 
 - PostgreSQL: ausschließlich `SELECT` beziehungsweise `COPY (SELECT ...) TO STDOUT`
 - CDN: ausschließlich `GET /cdn/rest/delivery/<contentPath>`
+- Kurze T2med-Verweise wie `cdn://<ID>` werden wie im bestätigten E‑Akte-Exporter zu `APS/Praxis/Patient/<ID>` normalisiert; vollständige Verweise bleiben unverändert.
 - APS-Lesen: `POST /praxis/verweis/dokumentverweis/find`
 - APS-Schreiben: `POST /praxis/verweis/dokumentverweis/update`
 - Vor dem Update wird das vollständige DTO frisch gelesen und nur dessen Feld `text` geändert.

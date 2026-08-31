@@ -11,15 +11,19 @@ from .http_client import HttpClient
 
 
 CDN_SCHEME = "cdn://"
+DEFAULT_PATIENT_PREFIX = "APS/Praxis/Patient/"
 
 
 def content_path_from_reference(reference: str) -> str:
-    if not reference.startswith(CDN_SCHEME):
+    normalized = (reference or "").strip()
+    if not normalized.startswith(CDN_SCHEME):
         raise HttpRequestError("CDN-Verweis beginnt nicht mit cdn://")
-    content_path = reference[len(CDN_SCHEME) :].lstrip("/")
+    content_path = normalized[len(CDN_SCHEME) :].lstrip("/")
     if not content_path:
         raise HttpRequestError("CDN-Verweis enthält keinen contentPath")
-    return content_path
+    if content_path.startswith(DEFAULT_PATIENT_PREFIX):
+        return content_path
+    return DEFAULT_PATIENT_PREFIX + content_path
 
 
 class CdnClient:

@@ -25,6 +25,20 @@ def result(payload, status=200, url="https://t2med.test"):
 
 
 class CdnTests(unittest.TestCase):
+    def test_short_reference_gets_confirmed_patient_prefix(self):
+        self.assertEqual(
+            content_path_from_reference("cdn://bc2ae09ec853459597a28cd1105e22dd"),
+            "APS/Praxis/Patient/bc2ae09ec853459597a28cd1105e22dd",
+        )
+
+    def test_full_reference_is_not_prefixed_twice_and_whitespace_is_removed(self):
+        self.assertEqual(
+            content_path_from_reference(
+                "  cdn://APS/Praxis/Patient/bc2ae09ec853459597a28cd1105e22dd  "
+            ),
+            "APS/Praxis/Patient/bc2ae09ec853459597a28cd1105e22dd",
+        )
+
     def test_reference_is_encoded_and_file_is_written(self):
         http = FakeHttp([result(b"PDF", url="https://t2med.test")])
         client = CdnClient(http, "https://t2med.test/cdn/rest")
