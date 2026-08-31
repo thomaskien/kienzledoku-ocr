@@ -31,6 +31,18 @@ class DatabaseReaderTests(unittest.TestCase):
         self.assertNotIn("UPDATE", INVENTORY_SQL.upper())
         self.assertNotIn("DELETE", INVENTORY_SQL.upper())
 
+    def test_limit_counts_supported_pdfs_not_other_document_types(self):
+        csv_text = (
+            "patientennummer,objectid,revision,classid,gueltigkeitszeitpunkt,verweis,name,mimetype,groesse\n"
+            "100,not-pdf,1,60,2026-01-01,cdn://a,letter.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,10\n"
+            "100,pdf-by-mime,1,60,2026-01-02,cdn://b,scan,application/pdf,20\n"
+            "100,pdf-by-name,1,60,2026-01-03,cdn://c,scan.PDF,application/octet-stream,30\n"
+        )
+        reader = DatabaseReader(T2medConfig())
+        with mock.patch.object(reader, "_run", return_value=csv_text):
+            items = reader.inventory(limit=1)
+        self.assertEqual([item.object_id for item in items], ["pdf-by-mime"])
+
 
 class CommandOcrTests(unittest.TestCase):
     def test_stdout_backend(self):

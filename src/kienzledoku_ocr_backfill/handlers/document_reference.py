@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional
 from .. import __version__
 from ..aps_client import ApsClient
 from ..cdn_client import CdnClient
-from ..db_reader import DatabaseReader
+from ..db_reader import DatabaseReader, is_pdf_file_info
 from ..errors import (
     ApsFindError,
     ApsUpdateError,
@@ -51,9 +51,7 @@ class DocumentReferenceHandler:
 
     @staticmethod
     def supports(item: InventoryItem) -> bool:
-        mime = (item.mime_type or "").split(";", 1)[0].strip().lower()
-        filename_is_pdf = bool(item.filename and item.filename.lower().endswith(".pdf"))
-        return item.class_id == 60 and (mime in {"application/pdf", "application/x-pdf"} or filename_is_pdf)
+        return item.class_id == 60 and is_pdf_file_info(item.filename, item.mime_type)
 
     def _base_record(self, item: InventoryItem) -> dict[str, Any]:
         return {

@@ -17,7 +17,7 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - Bereits vorhandene Marker `kienzledoku OCR v…` verhindern Doppelanhänge.
 - Schreibvorgänge laufen bewusst nicht parallel.
 
-`classid = 59` (Bildeinträge) ist nicht freigeschaltet. Dafür muss zuerst der eigene APS-Adapter end-to-end bestätigt werden.
+`classid = 59` (Bildeinträge) ist nicht freigeschaltet. Dafür muss zuerst der eigene APS-Adapter end-to-end bestätigt werden. `--limit` wird erst nach der Dateiinfo-Prüfung angewendet und zählt damit tatsächliche PDF-Kandidaten; andere `classid-60`-Dateitypen verbrauchen das Limit nicht.
 
 ## Voraussetzungen
 

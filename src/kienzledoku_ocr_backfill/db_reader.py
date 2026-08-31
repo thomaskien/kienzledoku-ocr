@@ -16,6 +16,12 @@ from .models import InventoryItem
 
 _SAFE_OBJECT_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
+
+def is_pdf_file_info(filename: Optional[str], mime_type: Optional[str]) -> bool:
+    mime = (mime_type or "").split(";", 1)[0].strip().lower()
+    name = (filename or "").strip().lower()
+    return mime in {"application/pdf", "application/x-pdf"} or name.endswith(".pdf")
+
 INVENTORY_SQL = r"""
 COPY (
     WITH inventory AS (
@@ -121,6 +127,9 @@ class DatabaseReader:
                 mime_type=row["mimetype"] or None,
                 size=int(row["groesse"]) if row["groesse"] else None,
             )
+            # --limit counts actual PDF candidates, not other classid-60 files.
+            if not is_pdf_file_info(item.filename, item.mime_type):
+                continue
             if patient_number is not None and item.patient_number != patient_number:
                 continue
             if object_id is not None and item.object_id != object_id:
