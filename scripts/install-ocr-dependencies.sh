@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.00"
+VERSION="1.1.1"
 
 readonly PACKAGES=(
   ocrmypdf
@@ -81,6 +81,16 @@ verify_dependencies() {
         failed=1
       fi
     done
+  fi
+
+  if command -v qpdf >/dev/null 2>&1; then
+    qpdf_help="$(qpdf --help=all 2>&1 || qpdf --help 2>&1 || true)"
+    if [[ "$qpdf_help" == *"--rotate"* && "$qpdf_help" == *"--flatten-rotation"* ]]; then
+      echo "  [OK] qpdf kann einzelne PDF-Seiten drehen"
+    else
+      echo "  [FEHLT] qpdf unterstützt --rotate/--flatten-rotation nicht" >&2
+      failed=1
+    fi
   fi
 
   if (( failed != 0 )); then

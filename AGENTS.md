@@ -21,6 +21,11 @@
 
 ## Prüfung
 
+- Jede funktionale oder benutzersichtbare Änderung muss die Projektversion in
+  `src/kienzledoku_ocr_backfill/__init__.py`, `pyproject.toml`, Installer und
+  Changelog inkrementieren. Keine Änderung unter unveränderter Versionsnummer
+  veröffentlichen.
+
 Vor Commit mindestens ausführen:
 
 ```bash

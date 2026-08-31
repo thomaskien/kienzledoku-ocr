@@ -53,11 +53,13 @@ class OcrmypdfBackend(OcrBackend):
         *,
         ocrmypdf: str = "ocrmypdf",
         pdftotext: str = "pdftotext",
+        qpdf: str = "qpdf",
         language: str = "deu+eng",
         jobs: int = 2,
         timeout: float = 1800.0,
         tesseract_timeout: float = 300.0,
         rotate_pages_threshold: float = 14.0,
+        forced_page_rotations: Sequence[tuple[int, str]] = (),
     ) -> None:
         if jobs < 1:
             raise ValueError("OCR-Jobs muss mindestens 1 sein")
@@ -67,13 +69,18 @@ class OcrmypdfBackend(OcrBackend):
             raise ValueError("OCR-Sprache darf nicht leer sein")
         if rotate_pages_threshold < 0:
             raise ValueError("OCR-Drehschwelle darf nicht negativ sein")
+        for page, angle in forced_page_rotations:
+            if page < 1 or angle not in {"+90", "-90", "+180", "-180", "+270", "-270"}:
+                raise ValueError("Ungültige erzwungene Seitendrehung")
         self._ocrmypdf = ocrmypdf
         self._pdftotext = pdftotext
+        self._qpdf = qpdf
         self._language = language
         self._jobs = jobs
         self._timeout = timeout
         self._tesseract_timeout = tesseract_timeout
         self._rotate_pages_threshold = rotate_pages_threshold
+        self._forced_page_rotations = tuple(forced_page_rotations)
         self._mode_args: Optional[tuple[str, ...]] = None
 
     def _detect_mode_args(self) -> tuple[str, ...]:
@@ -101,6 +108,36 @@ class OcrmypdfBackend(OcrBackend):
             raise OcrError(f"OCRmyPDF-Backend unterstützt keinen MIME-Typ {mime_type}")
 
         with tempfile.TemporaryDirectory(prefix="kienzledoku-ocrmypdf-") as tmp:
+            ocr_input = path
+            if self._forced_page_rotations:
+                rotated_input = Path(tmp) / "forced-rotation.pdf"
+                rotate_args = [
+                    f"--rotate={angle}:{page}"
+                    for page, angle in self._forced_page_rotations
+                ]
+                rotate_result = _run(
+                    [
+                        self._qpdf,
+                        str(path),
+                        str(rotated_input),
+                        *rotate_args,
+                        "--flatten-rotation",
+                    ],
+                    timeout=self._timeout,
+                )
+                if (
+                    rotate_result.returncode != 0
+                    or not rotated_input.is_file()
+                    or rotated_input.stat().st_size == 0
+                ):
+                    detail = self._last_error(rotate_result.stderr)
+                    suffix = f": {detail}" if detail else ""
+                    raise OcrError(
+                        "qpdf-Seitendrehung endete mit Status "
+                        f"{rotate_result.returncode}{suffix}"
+                    )
+                ocr_input = rotated_input
+
             output_pdf = Path(tmp) / "ocr.pdf"
             command = [
                 self._ocrmypdf,
@@ -124,7 +161,7 @@ class OcrmypdfBackend(OcrBackend):
                 f"{self._tesseract_timeout:g}",
                 "--jobs",
                 str(self._jobs),
-                str(path),
+                str(ocr_input),
                 str(output_pdf),
             ]
             ocr_result = _run(command, timeout=self._timeout)

@@ -8,6 +8,11 @@
 - Meldung, ob und wann bereits eine KienzleDoku-OCR erfolgt ist
 - Sichtbare Statusübergänge für Laden, OCR, APS-Schreiben, Abschluss und nächstes Dokument
 
+## 1.1.1 – 31.08.2026
+
+- Erzwungene, seitenbezogene +90°/-90°-Drehung einer temporären OCR-Arbeitskopie
+- qpdf-Vorprüfung, ohne Änderung der CDN-Originaldatei
+
 ## 1.1 – 31.08.2026
 
 - Klare BEGINN-/ENDE-Markierung um jeden neu erzeugten OCR-Block

@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shlex
 import sys
 import urllib.parse
@@ -51,6 +52,15 @@ def _nonnegative_float(value: str) -> float:
     if parsed < 0:
         raise argparse.ArgumentTypeError("Wert darf nicht negativ sein")
     return parsed
+
+
+def _forced_page_rotation(value: str) -> tuple[int, str]:
+    match = re.fullmatch(r"([1-9][0-9]*):([+-](?:90|180|270))", value.strip())
+    if match is None:
+        raise argparse.ArgumentTypeError(
+            "Format muss SEITE:+WINKEL sein, zum Beispiel 1:+90"
+        )
+    return int(match.group(1)), match.group(2)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -121,6 +131,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--ocr-timeout", type=float, default=1800.0)
     parser.add_argument("--ocrmypdf", default="ocrmypdf", help="OCRmyPDF-Programm oder absoluter Pfad")
     parser.add_argument("--pdftotext", default="pdftotext", help="pdftotext-Programm oder absoluter Pfad")
+    parser.add_argument("--qpdf", default="qpdf", help="qpdf-Programm oder absoluter Pfad")
     parser.add_argument("--ocr-language", default="deu+eng", help="Tesseract-Sprachen; Standard deu+eng")
     parser.add_argument("--ocr-jobs", type=_positive_int, default=2, help="Interne OCRmyPDF-Jobs; Standard 2")
     parser.add_argument(
@@ -130,6 +141,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help=(
             "Sicherheitsschwelle für automatische 90°-Seitendrehung; Standard 14. "
             "Für schwierige Tabellen gezielt 2.0 testen."
+        ),
+    )
+    parser.add_argument(
+        "--force-rotate-page",
+        action="append",
+        type=_forced_page_rotation,
+        default=[],
+        metavar="SEITE:+WINKEL",
+        help=(
+            "Eine PDF-Seite in der temporären OCR-Kopie ausdrücklich drehen, "
+            "z. B. 1:+90; für mehrere Seiten wiederholen"
         ),
     )
     parser.add_argument(
@@ -210,22 +232,33 @@ def run(args: argparse.Namespace) -> int:
         raw_ocr_command = args.ocr_command or os.environ.get("KIENZLEDOKU_OCR_COMMAND", "")
         try:
             if raw_ocr_command.strip():
+                if args.force_rotate_page:
+                    raise BackfillError(
+                        "--force-rotate-page ist nur mit dem OCRmyPDF-Standardbackend verfügbar"
+                    )
                 ocr_command = shlex.split(raw_ocr_command)
                 ocr = CommandOcrBackend(ocr_command, timeout=args.ocr_timeout)
             else:
                 ocr = OcrmypdfBackend(
                     ocrmypdf=args.ocrmypdf,
                     pdftotext=args.pdftotext,
+                    qpdf=args.qpdf,
                     language=args.ocr_language,
                     jobs=args.ocr_jobs,
                     timeout=args.ocr_timeout,
                     tesseract_timeout=args.tesseract_timeout,
                     rotate_pages_threshold=args.rotate_pages_threshold,
+                    forced_page_rotations=args.force_rotate_page,
                 )
         except ValueError as exc:
             raise BackfillError(str(exc)) from exc
 
     username, password = _credentials(args)
+    for page, angle in args.force_rotate_page:
+        print(
+            f"OCR-Vorverarbeitung: Seite {page} wird in der temporären "
+            f"Arbeitskopie um {angle}° gedreht."
+        )
     ssl_context = make_ssl_context(config.insecure, config.ca_cert)
     if config.insecure:
         print("WARNUNG: TLS-Zertifikatsprüfung ist deaktiviert.", file=sys.stderr)

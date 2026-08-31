@@ -47,7 +47,7 @@ Nächstes Dokument
 
 ## Vor der Implementierung zuzuordnen
 
-Die vorhandene Version 1.1 liefert bereits Dateiname, APS-Text,
+Die vorhandene Version 1.1.1 liefert bereits Dateiname, APS-Text,
 Dokumentzeitpunkt und Patientennummer. Vor der Umsetzung wird anhand der
 übergebenen APS-Schnittstelleninformation eindeutig festgelegt:
 

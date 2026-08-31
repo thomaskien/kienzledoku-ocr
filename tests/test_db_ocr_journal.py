@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from kienzledoku_ocr_backfill.cli import parse_args
 from kienzledoku_ocr_backfill.config import T2medConfig
 from kienzledoku_ocr_backfill.db_reader import DatabaseReader, INVENTORY_SQL
 from kienzledoku_ocr_backfill.journal import Journal
@@ -73,6 +74,19 @@ class CommandOcrTests(unittest.TestCase):
             self.assertEqual(backend.extract_text(path, "application/pdf"), "Datei-OCR")
 
 
+class CliTests(unittest.TestCase):
+    def test_forced_page_rotations_are_parsed_and_repeatable(self):
+        args = parse_args(
+            [
+                "--force-rotate-page",
+                "1:+90",
+                "--force-rotate-page",
+                "3:-90",
+            ]
+        )
+        self.assertEqual(args.force_rotate_page, [(1, "+90"), (3, "-90")])
+
+
 class OcrmypdfBackendTests(unittest.TestCase):
     def test_matches_confirmed_kienzlefax_pipeline_and_extracts_full_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -98,13 +112,26 @@ class OcrmypdfBackendTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_pdftotext.chmod(0o755)
+            qpdf_argument_log = root / "qpdf-arguments.json"
+            fake_qpdf = root / "qpdf"
+            fake_qpdf.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, shutil, sys\n"
+                "from pathlib import Path\n"
+                f"Path({str(qpdf_argument_log)!r}).write_text(json.dumps(sys.argv), encoding='utf-8')\n"
+                "shutil.copyfile(sys.argv[1], sys.argv[2])\n",
+                encoding="utf-8",
+            )
+            fake_qpdf.chmod(0o755)
             source = root / "input.pdf"
             source.write_bytes(b"%PDF-input")
 
             backend = OcrmypdfBackend(
                 ocrmypdf=str(fake_ocr),
                 pdftotext=str(fake_pdftotext),
+                qpdf=str(fake_qpdf),
                 rotate_pages_threshold=2.0,
+                forced_page_rotations=((1, "+90"),),
             )
             text = backend.extract_text(source, "application/pdf")
 
@@ -132,6 +159,12 @@ class OcrmypdfBackendTests(unittest.TestCase):
 
             threshold_index = arguments.index("--rotate-pages-threshold")
             self.assertEqual(arguments[threshold_index + 1], "2")
+            self.assertEqual(source.read_bytes(), b"%PDF-input")
+            qpdf_arguments = json.loads(qpdf_argument_log.read_text(encoding="utf-8"))
+            self.assertIn("--rotate=+90:1", qpdf_arguments)
+            self.assertIn("--flatten-rotation", qpdf_arguments)
+            self.assertNotEqual(arguments[-2], str(source))
+            self.assertTrue(arguments[-2].endswith("forced-rotation.pdf"))
 
 
 class JournalTests(unittest.TestCase):

@@ -43,6 +43,17 @@ Dokument zunächst im Dry-Run mit `--rotate-pages-threshold 2.0` getestet. Der
 niedrigere Wert darf nicht ungeprüft auf den Gesamtlauf übertragen werden, da
 er bei mehrdeutigen Seiten falsche Drehungen wahrscheinlicher macht.
 
+Bleibt das Ergebnis bei einer Seite mit gemischten Textorientierungen trotzdem
+unverändert, wird die bekannte Seite ausdrücklich in der temporären
+OCR-Arbeitskopie gedreht:
+
+```bash
+--force-rotate-page 1:+90
+```
+
+Die Seitennummer ist einsbasiert, `+90` bedeutet im Uhrzeigersinn. Die
+CDN-Originaldatei wird dabei weder überschrieben noch neu hochgeladen.
+
 ## 3. Testobjekt `test5.pdf`
 
 Bestätigte Daten:

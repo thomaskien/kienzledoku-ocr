@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.1 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises.
+Version 1.1.1 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -49,6 +49,7 @@ Ohne zusätzliche Option wird das KienzleFax-OCRmyPDF-Backend verwendet. Seine P
 ```bash
 --ocrmypdf /usr/bin/ocrmypdf \
 --pdftotext /usr/bin/pdftotext \
+--qpdf /usr/bin/qpdf \
 --ocr-language deu+eng \
 --ocr-jobs 2 \
 --rotate-pages-threshold 14 \
@@ -72,6 +73,26 @@ T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
 
 Der niedrigere Wert sollte zunächst nur für das betroffene Dokument verwendet
 werden, weil er bei mehrdeutigen Seiten auch falsche Drehungen begünstigt.
+
+Enthält eine Seite gleichzeitig waagerechten und seitlichen Text, kann auch eine
+niedrige Automatikschwelle wirkungslos bleiben. Dann lässt sich eine bekannte
+Seite ausschließlich in der temporären OCR-Arbeitskopie ausdrücklich drehen:
+
+```bash
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+  --dry-run \
+  --reprocess \
+  --username t2user \
+  --object-id 003ce75054486374405bdf673254f82ffa90 \
+  --force-rotate-page 1:+90 \
+  --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
+  --insecure
+```
+
+`--force-rotate-page` kann für mehrere Seiten wiederholt werden. Zulässige
+Winkel sind `+90`, `-90`, `+180`, `-180`, `+270` und `-270`. qpdf verändert nur
+eine automatisch gelöschte temporäre Kopie; CDN-Original und T2med-PDF bleiben
+unverändert.
 
 Die OCR-Abstraktion bleibt erhalten. Ein eigener Befehl kann ausdrücklich mit `--ocr-command` eingesetzt werden. Er wird ohne Shell gestartet; `{input}` ist verpflichtend. Liefert das Programm den Text auf stdout, genügt zum Beispiel:
 
@@ -177,7 +198,7 @@ Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
 ----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.1, 31.08.2026 14:55
+kienzledoku OCR v1.1.1, 31.08.2026 14:55
 ----- ENDE kienzledoku OCR -----
 ```
 

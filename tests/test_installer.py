@@ -56,6 +56,18 @@ class DependencyInstallerTests(unittest.TestCase):
                 )
                 stub.chmod(0o755)
 
+            qpdf = bin_dir / "qpdf"
+            qpdf.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ ${1:-} == --help=all ]]; then\n"
+                "  echo '--rotate --flatten-rotation'\n"
+                "else\n"
+                "  echo 'qpdf test'\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            qpdf.chmod(0o755)
+
             environment = dict(os.environ)
             environment["PATH"] = f"{bin_dir}:/usr/bin:/bin"
             result = subprocess.run(
