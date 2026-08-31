@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2 – geplant
+
+- Ausführliche, schrittweise Fortschrittsausgabe pro Dokument
+- Anzeige von Dokument-ID, Dokumentdatum, Patientennummer und Patientenname
+- Dokumententitel und Dokumentenname mit jeweils höchstens zwei Zeilen
+- Meldung, ob und wann bereits eine KienzleDoku-OCR erfolgt ist
+- Sichtbare Statusübergänge für Laden, OCR, APS-Schreiben, Abschluss und nächstes Dokument
+
 ## 1.1 – 31.08.2026
 
 - Klare BEGINN-/ENDE-Markierung um jeden neu erzeugten OCR-Block
