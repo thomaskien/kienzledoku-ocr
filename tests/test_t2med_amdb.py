@@ -76,6 +76,15 @@ class T2medAmdbResolverTests(unittest.TestCase):
             self.assertTrue(any("PZN 09322739 wird abgefragt" in line for line in progress))
             self.assertTrue(any("Wirkstoff Tamsulosin" in line for line in progress))
             self.assertTrue(any("PZN 09531845 nicht gefunden" in line for line in progress))
+            self.assertTrue(
+                any(line.startswith("Dauer T2med-AMDB-Verbindung:") for line in progress)
+            )
+            self.assertTrue(
+                any(
+                    line.startswith("Dauer T2med-AMDB PZN 09322739:")
+                    for line in progress
+                )
+            )
 
             queries = [
                 json.loads(line)

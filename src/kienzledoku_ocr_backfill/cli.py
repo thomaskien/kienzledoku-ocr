@@ -25,6 +25,7 @@ from .journal import Journal
 from .ocr.command import CommandOcrBackend
 from .ocr.ocrmypdf import OcrmypdfBackend
 from .processor import BackfillProcessor
+from .progress import TimestampedReporter, timed_step
 from .rollback import RollbackProcessor
 
 
@@ -276,6 +277,8 @@ def _build_config(args: argparse.Namespace) -> T2medConfig:
 
 
 def run(args: argparse.Namespace) -> int:
+    report = TimestampedReporter()
+    error_report = TimestampedReporter(lambda message: print(message, file=sys.stderr))
     config = _build_config(args)
     database = DatabaseReader(config)
     if args.rollback and args.resume:
@@ -288,12 +291,13 @@ def run(args: argparse.Namespace) -> int:
     inventory = []
     ocr = None
     if not args.rollback:
-        inventory = database.inventory(
-            patient_number=args.patient,
-            object_id=args.object_id,
-            limit=args.limit,
-        )
-        print(f"Inventar: {len(inventory)} PDF-Kandidaten")
+        with timed_step("Inventarisierung", report):
+            inventory = database.inventory(
+                patient_number=args.patient,
+                object_id=args.object_id,
+                limit=args.limit,
+            )
+        report(f"Inventar: {len(inventory)} PDF-Kandidaten")
         if not inventory:
             return 0
 
@@ -328,7 +332,7 @@ def run(args: argparse.Namespace) -> int:
                     amdb_timeout=args.amdb_timeout,
                     barcode_dpi=args.barcode_dpi,
                     barcode_retry_dpi=args.barcode_retry_dpi,
-                    progress=print,
+                    progress=report,
                 )
         except ValueError as exc:
             raise BackfillError(str(exc)) from exc
@@ -336,15 +340,15 @@ def run(args: argparse.Namespace) -> int:
     username, password = _credentials(args)
     ssl_context = make_ssl_context(config.insecure, config.ca_cert)
     if config.insecure:
-        print("WARNUNG: TLS-Zertifikatsprüfung ist deaktiviert.", file=sys.stderr)
+        error_report("WARNUNG: TLS-Zertifikatsprüfung ist deaktiviert.")
     if args.rollback and not args.apply:
-        print("ROLLBACK-DRY-RUN: Revision und Text-Hash werden geprüft; keine Updates.")
+        report("ROLLBACK-DRY-RUN: Revision und Text-Hash werden geprüft; keine Updates.")
     elif args.rollback:
-        print("ROLLBACK-APPLY: Nur konfliktfreie Journal-Updates werden zurückgesetzt.")
+        report("ROLLBACK-APPLY: Nur konfliktfreie Journal-Updates werden zurückgesetzt.")
     elif not args.apply:
-        print("DRY-RUN: Es werden keine APS-Updates ausgeführt.")
+        report("DRY-RUN: Es werden keine APS-Updates ausgeführt.")
     else:
-        print("APPLY: APS-Texte werden nach OCR und Write-ahead-Journal aktualisiert.")
+        report("APPLY: APS-Texte werden nach OCR und Write-ahead-Journal aktualisiert.")
 
     http = HttpClient(
         username,
@@ -357,7 +361,7 @@ def run(args: argparse.Namespace) -> int:
         aps = ApsClient(http, config.aps_base_url)
         if args.rollback:
             summary = RollbackProcessor(
-                database, aps, journal, report=print
+                database, aps, journal, report=report
             ).run(
                 apply=args.apply,
                 patient_number=args.patient,
@@ -372,16 +376,19 @@ def run(args: argparse.Namespace) -> int:
                 aps,
                 ocr,
                 journal,
-                report=print,
+                report=report,
                 reprocess_existing=args.reprocess,
             )
-            summary = BackfillProcessor(handler, journal, report=print).run(
+            summary = BackfillProcessor(handler, journal, report=report).run(
                 inventory,
                 apply=args.apply,
                 resume=args.resume,
             )
 
-    print("Zusammenfassung: " + json.dumps(summary.counts, ensure_ascii=False, sort_keys=True))
+    report(
+        "Zusammenfassung: "
+        + json.dumps(summary.counts, ensure_ascii=False, sort_keys=True)
+    )
     failure_statuses = {
         "missing_cdn",
         "unsupported_type",
@@ -403,10 +410,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         return run(parse_args(argv))
     except (BackfillError, RuntimeError, OSError) as exc:
-        print(f"FEHLER: {exc}", file=sys.stderr)
+        TimestampedReporter(lambda message: print(message, file=sys.stderr))(
+            f"FEHLER: {exc}"
+        )
         return 1
     except KeyboardInterrupt:
-        print("Abgebrochen.", file=sys.stderr)
+        TimestampedReporter(lambda message: print(message, file=sys.stderr))(
+            "Abgebrochen."
+        )
         return 130
 
 

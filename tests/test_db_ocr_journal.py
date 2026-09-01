@@ -157,6 +157,7 @@ class OcrmypdfBackendTests(unittest.TestCase):
             fake_qpdf.chmod(0o755)
             source = root / "input.pdf"
             source.write_bytes(b"%PDF-input")
+            progress = []
 
             backend = OcrmypdfBackend(
                 ocrmypdf=str(fake_ocr),
@@ -165,6 +166,7 @@ class OcrmypdfBackendTests(unittest.TestCase):
                 rotate_pages_threshold=2.0,
                 forced_page_rotations=((1, "+90"),),
                 auto_orient_pages=False,
+                progress=progress.append,
             )
             text = backend.extract_text(source, "application/pdf")
 
@@ -198,6 +200,20 @@ class OcrmypdfBackendTests(unittest.TestCase):
             self.assertIn("--flatten-rotation", qpdf_arguments)
             self.assertNotEqual(arguments[-2], str(source))
             self.assertTrue(arguments[-2].endswith("oriented.pdf"))
+            for label in (
+                "Dauer Orientierungsprüfung:",
+                "Dauer Data-Matrix/BMP-Prüfung:",
+                "Dauer OCRmyPDF:",
+                "Dauer Textextraktion/Zusammenführung:",
+            ):
+                self.assertTrue(
+                    any(message.startswith(label) for message in progress),
+                    label,
+                )
+            self.assertEqual(
+                set(backend.diagnostics()["timingsSeconds"]),
+                {"orientation", "medicationPlanScan", "ocrmypdf", "textExtraction"},
+            )
 
     def test_osd_orients_each_page_and_records_diagnostics(self):
         with tempfile.TemporaryDirectory() as tmp:

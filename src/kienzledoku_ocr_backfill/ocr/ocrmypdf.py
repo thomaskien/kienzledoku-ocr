@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from ..errors import OcrError
 from ..medication_plans import MedicationPlanScan, MedicationPlanScanner
+from ..progress import timed_step
 from .base import OcrBackend
 
 
@@ -154,6 +155,7 @@ class OcrmypdfBackend(OcrBackend):
         self._progress = progress or (lambda message: None)
         self._last_orientation_decisions: list[OrientationDecision] = []
         self._last_medication_diagnostics: Optional[dict[str, Any]] = None
+        self._last_timings: dict[str, float] = {}
         self._mode_args: Optional[tuple[str, ...]] = None
 
     def _detect_mode_args(self) -> tuple[str, ...]:
@@ -524,6 +526,7 @@ class OcrmypdfBackend(OcrBackend):
                 decision.as_dict() for decision in self._last_orientation_decisions
             ],
             "medicationPlans": self._last_medication_diagnostics,
+            "timingsSeconds": dict(self._last_timings) or None,
         }
 
     def _scan_medication_plans(self, path: Path) -> MedicationPlanScan:
@@ -588,6 +591,7 @@ class OcrmypdfBackend(OcrBackend):
     def extract_text(self, path: Path, mime_type: str) -> str:
         self._last_orientation_decisions = []
         self._last_medication_diagnostics = None
+        self._last_timings = {}
         if mime_type.split(";", 1)[0].strip().lower() not in {
             "application/pdf",
             "application/x-pdf",
@@ -596,8 +600,20 @@ class OcrmypdfBackend(OcrBackend):
 
         with tempfile.TemporaryDirectory(prefix="kienzledoku-ocrmypdf-") as tmp:
             tmp_path = Path(tmp)
-            ocr_input = self._prepare_ocr_input(path, tmp_path)
-            medication_scan = self._scan_medication_plans(ocr_input)
+            with timed_step(
+                "Orientierungsprüfung",
+                self._progress,
+                timings=self._last_timings,
+                key="orientation",
+            ):
+                ocr_input = self._prepare_ocr_input(path, tmp_path)
+            with timed_step(
+                "Data-Matrix/BMP-Prüfung",
+                self._progress,
+                timings=self._last_timings,
+                key="medicationPlanScan",
+            ):
+                medication_scan = self._scan_medication_plans(ocr_input)
             self._last_medication_diagnostics = medication_scan.diagnostics
             medication_pages = set(medication_scan.pages)
             ocr_pages = [
@@ -607,66 +623,102 @@ class OcrmypdfBackend(OcrBackend):
             ]
 
             if medication_pages and not ocr_pages:
-                return "\n\n".join(
-                    medication_scan.pages[page] for page in sorted(medication_pages)
-                )
+                with timed_step(
+                    "Textextraktion/Zusammenführung",
+                    self._progress,
+                    timings=self._last_timings,
+                    key="textExtraction",
+                ):
+                    text = "\n\n".join(
+                        medication_scan.pages[page]
+                        for page in sorted(medication_pages)
+                    )
+                return text
 
             output_pdf = Path(tmp) / "ocr.pdf"
-            command = [
-                self._ocrmypdf,
-                *self._detect_mode_args(),
-                "-l",
-                self._language,
-                "--tesseract-oem",
-                "1",
-                "--rotate-pages",
-                "--rotate-pages-threshold",
-                f"{self._rotate_pages_threshold:g}",
-                "--deskew",
-                "--clean",
-                "--oversample",
-                "300",
-                "--output-type",
-                "pdfa-3",
-                "--optimize",
-                "1",
-                "--tesseract-timeout",
-                f"{self._tesseract_timeout:g}",
-                "--jobs",
-                str(self._jobs),
-            ]
-            if medication_pages:
-                command.extend(["--pages", ",".join(str(page) for page in ocr_pages)])
-            command.extend([str(ocr_input), str(output_pdf)])
-            ocr_result = _run(command, timeout=self._timeout)
-            if ocr_result.returncode != 0 or not output_pdf.is_file() or output_pdf.stat().st_size == 0:
-                detail = self._last_error(ocr_result.stderr)
-                suffix = f": {detail}" if detail else ""
-                raise OcrError(
-                    f"OCRmyPDF endete mit Status {ocr_result.returncode}{suffix}"
-                )
+            with timed_step(
+                "OCRmyPDF",
+                self._progress,
+                timings=self._last_timings,
+                key="ocrmypdf",
+            ):
+                command = [
+                    self._ocrmypdf,
+                    *self._detect_mode_args(),
+                    "-l",
+                    self._language,
+                    "--tesseract-oem",
+                    "1",
+                    "--rotate-pages",
+                    "--rotate-pages-threshold",
+                    f"{self._rotate_pages_threshold:g}",
+                    "--deskew",
+                    "--clean",
+                    "--oversample",
+                    "300",
+                    "--output-type",
+                    "pdfa-3",
+                    "--optimize",
+                    "1",
+                    "--tesseract-timeout",
+                    f"{self._tesseract_timeout:g}",
+                    "--jobs",
+                    str(self._jobs),
+                ]
+                if medication_pages:
+                    command.extend(
+                        ["--pages", ",".join(str(page) for page in ocr_pages)]
+                    )
+                command.extend([str(ocr_input), str(output_pdf)])
+                ocr_result = _run(command, timeout=self._timeout)
+                if (
+                    ocr_result.returncode != 0
+                    or not output_pdf.is_file()
+                    or output_pdf.stat().st_size == 0
+                ):
+                    detail = self._last_error(ocr_result.stderr)
+                    suffix = f": {detail}" if detail else ""
+                    raise OcrError(
+                        f"OCRmyPDF endete mit Status {ocr_result.returncode}{suffix}"
+                    )
 
             if medication_pages:
-                return self._mixed_text(output_pdf, medication_scan)
+                with timed_step(
+                    "Textextraktion/Zusammenführung",
+                    self._progress,
+                    timings=self._last_timings,
+                    key="textExtraction",
+                ):
+                    text = self._mixed_text(output_pdf, medication_scan)
+                return text
 
-            text_result = _run(
-                [
-                    self._pdftotext,
-                    "-enc",
-                    "UTF-8",
-                    "-nopgbrk",
-                    str(output_pdf),
-                    "-",
-                ],
-                timeout=self._timeout,
-            )
-            if text_result.returncode != 0:
-                detail = self._last_error(text_result.stderr)
-                suffix = f": {detail}" if detail else ""
-                raise OcrError(
-                    f"pdftotext endete mit Status {text_result.returncode}{suffix}"
+            with timed_step(
+                "Textextraktion/Zusammenführung",
+                self._progress,
+                timings=self._last_timings,
+                key="textExtraction",
+            ):
+                text_result = _run(
+                    [
+                        self._pdftotext,
+                        "-enc",
+                        "UTF-8",
+                        "-nopgbrk",
+                        str(output_pdf),
+                        "-",
+                    ],
+                    timeout=self._timeout,
                 )
-            try:
-                return text_result.stdout.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise OcrError("pdftotext-Ausgabe ist nicht UTF-8-kodiert") from exc
+                if text_result.returncode != 0:
+                    detail = self._last_error(text_result.stderr)
+                    suffix = f": {detail}" if detail else ""
+                    raise OcrError(
+                        f"pdftotext endete mit Status {text_result.returncode}{suffix}"
+                    )
+                try:
+                    text = text_result.stdout.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise OcrError(
+                        "pdftotext-Ausgabe ist nicht UTF-8-kodiert"
+                    ) from exc
+            return text

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kienzledoku-ocr-backfill"
-version = "1.5.2"
+version = "1.5.3"
 description = "Serieller, journalisierter OCR-Backfill fuer T2med-Dokumentverweise"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -125,6 +125,14 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(record["ocrChars"], len("Erkannter Text"))
             self.assertEqual(len(record["newTextSha256"]), 64)
             self.assertEqual(record["ocrDiagnostics"]["pageOrientations"][0]["rotation"], "+90")
+            self.assertTrue(
+                {
+                    "apsInitialRead",
+                    "cdnDownload",
+                    "ocrTotal",
+                    "textComposition",
+                }.issubset(record["timingsSeconds"])
+            )
 
     def test_apply_writes_old_text_before_update_then_verifies(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -142,8 +150,20 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(records[0]["oldText"], "Alter Titel")
             self.assertEqual(records[1]["revisionBefore"], 0)
             self.assertEqual(records[1]["revisionAfter"], 1)
+            self.assertTrue(
+                {
+                    "apsInitialRead",
+                    "cdnDownload",
+                    "ocrTotal",
+                    "apsPreUpdateRead",
+                    "textComposition",
+                    "apsWrite",
+                    "apsVerificationRead",
+                    "apsVerification",
+                }.issubset(records[1]["timingsSeconds"])
+            )
             self.assertIn("----- BEGINN kienzledoku OCR -----", aps.text)
-            self.assertIn("kienzledoku OCR v1.5.2,", aps.text)
+            self.assertIn("kienzledoku OCR v1.5.3,", aps.text)
             self.assertTrue(aps.text.endswith("----- ENDE kienzledoku OCR -----"))
 
     def test_existing_marker_skips_download_and_ocr(self):
@@ -324,6 +344,11 @@ class PipelineTests(unittest.TestCase):
             positions = [progress.index(message) for message in required]
             self.assertEqual(positions, sorted(positions))
             self.assertNotIn("Titelzeile 3", progress)
+            totals = [
+                message for message in progress if message.startswith("Gesamtzeit Dokument: ")
+            ]
+            self.assertEqual(len(totals), 2)
+            self.assertTrue(all(message.endswith(" s") for message in totals))
 
 
 if __name__ == "__main__":

@@ -91,6 +91,22 @@ Seitenausrichtung, OCR-Erfolg und Abschluss. Im Dry-Run muss ausdrücklich
 `--apply`-Lauf darf `OCR-Text geschrieben` melden. Zwischen zwei Kandidaten wird
 `Nächstes Dokument` ausgegeben.
 
+Ab Version 1.5.3 beginnt jede nichtleere Meldung mit einem lokalen Zeitstempel.
+Für die Geschwindigkeitsanalyse sind insbesondere diese Zeilen zu vergleichen:
+
+- `Dauer CDN-Download`
+- `Dauer Orientierungsprüfung`
+- `Dauer Data-Matrix/BMP-Prüfung`
+- `Dauer T2med-AMDB-Verbindung` und `Dauer T2med-AMDB PZN ...`
+- `Dauer OCRmyPDF`
+- `Dauer Textextraktion/Zusammenführung`
+- `Dauer APS-Schreiben` und `Dauer APS-Verifikation`
+- `Gesamtzeit Dokument`
+
+Die Sekundenwerte werden zusätzlich in `timingsSeconds` beziehungsweise
+`ocrDiagnostics.timingsSeconds` journalisiert. Dadurch kann die Analyse auch
+nach einem unbeaufsichtigten Lauf erfolgen.
+
 ## 3. Testobjekt `test5.pdf`
 
 Bestätigte Daten:

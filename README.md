@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.5.2 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
+Version 1.5.3 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -260,7 +260,7 @@ Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
 ----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.5.2, 31.08.2026 14:55
+kienzledoku OCR v1.5.3, 01.09.2026 10:00
 ----- ENDE kienzledoku OCR -----
 ```
 
@@ -283,6 +283,29 @@ Kommentar: -
 ```
 
 Die Footerzeit wird immer in `Europe/Berlin` erzeugt.
+
+## Zeitstempel und Laufzeitanalyse
+
+Version 1.5.3 versieht jede nichtleere Fortschrittsmeldung mit einem lokalen
+Zeitstempel. Die Laufzeiten werden mit einer monotonen Uhr gemessen und deshalb
+nicht durch eine nachträgliche Systemzeitkorrektur verfälscht. Ein Ausschnitt:
+
+```text
+[01.09.2026 10:11:12] Dokument wird geladen
+[01.09.2026 10:11:13] Dauer CDN-Download: 0.842 s
+[01.09.2026 10:11:13] OCR läuft
+[01.09.2026 10:11:25] Dauer Orientierungsprüfung: 12.137 s
+[01.09.2026 10:11:29] Dauer Data-Matrix/BMP-Prüfung: 3.804 s
+[01.09.2026 10:12:41] Dauer OCRmyPDF: 72.115 s
+[01.09.2026 10:12:42] Dauer Textextraktion/Zusammenführung: 0.391 s
+[01.09.2026 10:12:42] Dauer OCR gesamt: 89.006 s
+[01.09.2026 10:12:43] Gesamtzeit Dokument: 90.224 s
+```
+
+Zusätzlich stehen die Handler-Schrittzeiten im Journalfeld `timingsSeconds`.
+Die OCR-internen Zeiten stehen unter
+`ocrDiagnostics.timingsSeconds`. Alle Werte sind Sekunden mit
+Millisekundenauflösung.
 
 ## Journal und Status
 

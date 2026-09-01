@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 from .bfarm_pzn import normalize_pzn
+from .progress import timed_step
 
 
 DEFAULT_CONFIG = Path("/opt/t2med/server/mmi/service.conf")
@@ -124,17 +125,18 @@ class T2medAmdbResolver:
     def metadata(self) -> dict[str, Any]:
         if self._metadata is None:
             self._progress(f"T2med-Arzneimitteldatenbank wird abgefragt: Schema {self.schema}")
-            rows = self._run_select(
-                "SELECT JSON_OBJECT("
-                "'schema', DATABASE(), "
-                "'serverVersion', VERSION(), "
-                "'sourceTable', 'MEDPLAN_PACKAGE'"
-                ") "
-                "FROM information_schema.TABLES "
-                "WHERE TABLE_SCHEMA = DATABASE() "
-                "AND TABLE_NAME = 'MEDPLAN_PACKAGE' "
-                "AND TABLE_TYPE = 'BASE TABLE'"
-            )
+            with timed_step("T2med-AMDB-Verbindung", self._progress):
+                rows = self._run_select(
+                    "SELECT JSON_OBJECT("
+                    "'schema', DATABASE(), "
+                    "'serverVersion', VERSION(), "
+                    "'sourceTable', 'MEDPLAN_PACKAGE'"
+                    ") "
+                    "FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = DATABASE() "
+                    "AND TABLE_NAME = 'MEDPLAN_PACKAGE' "
+                    "AND TABLE_TYPE = 'BASE TABLE'"
+                )
             if len(rows) != 1:
                 raise T2medAmdbError(
                     "T2med-AMDB-Tabelle MEDPLAN_PACKAGE fehlt oder ist nicht eindeutig"
@@ -154,19 +156,20 @@ class T2medAmdbResolver:
             return self._cache[normalized]
 
         self._progress(f"T2med-AMDB: PZN {normalized} wird abgefragt")
-        rows = self._run_select(
-            "SELECT JSON_OBJECT("
-            "'pzn', PZN, "
-            "'name', PACKAGENAMEIFA, "
-            "'substance', MOLECULENAME, "
-            "'strength', MOLECULEMASSES, "
-            "'formIfa', PHARMFORMIFACODE, "
-            "'formMedicationPlan', MEDPLANPHARMFORMCODE"
-            ") "
-            "FROM MEDPLAN_PACKAGE "
-            f"WHERE PZN = '{normalized}' "
-            "LIMIT 2"
-        )
+        with timed_step(f"T2med-AMDB PZN {normalized}", self._progress):
+            rows = self._run_select(
+                "SELECT JSON_OBJECT("
+                "'pzn', PZN, "
+                "'name', PACKAGENAMEIFA, "
+                "'substance', MOLECULENAME, "
+                "'strength', MOLECULEMASSES, "
+                "'formIfa', PHARMFORMIFACODE, "
+                "'formMedicationPlan', MEDPLANPHARMFORMCODE"
+                ") "
+                "FROM MEDPLAN_PACKAGE "
+                f"WHERE PZN = '{normalized}' "
+                "LIMIT 2"
+            )
         if not rows:
             self._cache[normalized] = None
             self._progress(f"T2med-AMDB: PZN {normalized} nicht gefunden")

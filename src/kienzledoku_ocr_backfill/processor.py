@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
@@ -10,6 +11,7 @@ from . import __version__
 from .handlers.document_reference import DocumentReferenceHandler
 from .journal import Journal
 from .models import InventoryItem
+from .progress import format_duration
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,7 @@ class BackfillProcessor:
         completed = self._journal.completed_object_ids() if resume else set()
         counts: Counter[str] = Counter()
         for index, item in enumerate(items):
+            document_started = time.monotonic()
             if item.object_id in completed:
                 self._report("")
                 self._report("Identifiziere Dokument")
@@ -90,6 +93,10 @@ class BackfillProcessor:
                     self._report(f"Fehler: {str(exc)[:500]}")
                     status = "internal_error"
                 counts[status] += 1
+            self._report(
+                "Gesamtzeit Dokument: "
+                f"{format_duration(time.monotonic() - document_started)}"
+            )
             self._report("Dokument fertig")
             if index + 1 < len(items):
                 self._report("Nächstes Dokument")

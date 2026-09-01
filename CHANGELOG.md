@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.3 – 01.09.2026
+
+- Lokaler Zeitstempel vor jeder nichtleeren Fortschritts- und Statusmeldung
+- Laufzeitmessung mit monotoner Uhr für Inventarisierung, APS-Lesezugriffe,
+  CDN-Download, Orientierung, Data-Matrix/BMP, T2med-AMDB-Verbindung und PZN,
+  OCRmyPDF, Textextraktion, Textaufbereitung, Journal, APS-Schreiben und
+  Verifikation
+- Gesamtzeit wird nach jedem Dokument unabhängig vom Ergebnis ausgegeben
+- Schrittzeiten des Dokumenthandlers und des OCRmyPDF-Backends werden zusätzlich
+  als Sekundenwerte im geschützten JSONL-Journal abgelegt
+
 ## 1.5.2 – 31.08.2026
 
 - Bundesmedikationsplan ohne ASCII-/Tabellentrenner und ohne Nummerierung
