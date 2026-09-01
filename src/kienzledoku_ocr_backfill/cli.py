@@ -164,13 +164,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
             "z. B. 1:+90; für mehrere Seiten wiederholen"
         ),
     )
-    parser.add_argument(
+    orientation_group = parser.add_mutually_exclusive_group()
+    orientation_group.add_argument(
+        "--auto-orient-pages",
+        dest="auto_orient_pages",
+        action="store_true",
+        help=(
+            "Zusätzliche langsame Tesseract-Orientierungsprüfung vor OCRmyPDF "
+            "aktivieren"
+        ),
+    )
+    orientation_group.add_argument(
         "--no-auto-orient-pages",
         dest="auto_orient_pages",
         action="store_false",
-        default=True,
-        help="Automatische seitenweise Orientierungsprüfung deaktivieren",
+        help=(
+            "Zusätzliche Tesseract-Orientierungsprüfung deaktivieren "
+            "(Standard; OCRmyPDF dreht weiterhin automatisch)"
+        ),
     )
+    parser.set_defaults(auto_orient_pages=False)
     parser.add_argument(
         "--orientation-confidence",
         type=_nonnegative_float,
@@ -220,8 +233,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--barcode-retry-dpi",
         type=_positive_int,
-        default=600,
-        help="Zweiter Data-Matrix-Versuch bei Nichterkennung; Standard 600 dpi",
+        default=300,
+        help=(
+            "Auflösung eines zweiten Data-Matrix-Versuchs; Standard 300 "
+            "deaktiviert den zweiten PDF-Renderdurchlauf, 600 aktiviert ihn"
+        ),
     )
     parser.add_argument(
         "--tesseract-timeout",

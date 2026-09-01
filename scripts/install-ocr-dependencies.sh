@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.5.3"
+VERSION="1.5.4"
 
 readonly PACKAGES=(
   python3

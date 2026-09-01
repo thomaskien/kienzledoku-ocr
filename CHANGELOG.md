@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.4 – 01.09.2026
+
+- Nach zwei Messläufen bestätigte schnelle Standardpipeline: Data-Matrix-Prüfung
+  einmalig mit 300 dpi und keine zusätzliche Tesseract-Orientierungsprüfung vor
+  OCRmyPDF
+- OCRmyPDFs weiterhin aktive automatische Seitendrehung bleibt das
+  Standard-Sicherheitsnetz
+- Schwierige Dokumente können gezielt mit `--auto-orient-pages`,
+  `--barcode-retry-dpi 600` und `--force-rotate-page` erneut verarbeitet werden
+- Bestätigter Referenzlauf eines sechsseitigen Dokuments von 47,625 auf
+  8,042 Sekunden verkürzt; der gedrehte Test-Medikationsplan wurde im schnellen
+  Modus weiterhin erkannt und vollständig über die T2med-AMDB aufgelöst
+
 ## 1.5.3 – 01.09.2026
 
 - Lokaler Zeitstempel vor jeder nichtleeren Fortschritts- und Statusmeldung

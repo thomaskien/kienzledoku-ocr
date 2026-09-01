@@ -76,6 +76,18 @@ class CommandOcrTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_fast_ocr_defaults_and_robust_overrides_are_parsed(self):
+        defaults = parse_args([])
+        self.assertFalse(defaults.auto_orient_pages)
+        self.assertEqual(defaults.barcode_dpi, 300)
+        self.assertEqual(defaults.barcode_retry_dpi, 300)
+
+        robust = parse_args(
+            ["--auto-orient-pages", "--barcode-retry-dpi", "600"]
+        )
+        self.assertTrue(robust.auto_orient_pages)
+        self.assertEqual(robust.barcode_retry_dpi, 600)
+
     def test_forced_page_rotations_are_parsed_and_repeatable(self):
         args = parse_args(
             [
@@ -267,6 +279,7 @@ class OcrmypdfBackendTests(unittest.TestCase):
                 pdftoppm=str(fake_pdftoppm),
                 qpdf=str(fake_qpdf),
                 tesseract=str(fake_tesseract),
+                auto_orient_pages=True,
                 progress=progress.append,
             )
             with tempfile.TemporaryDirectory() as work:

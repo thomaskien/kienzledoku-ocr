@@ -62,17 +62,18 @@ darf den übrigen Batch nicht abbrechen.
 
 ### Seitlich eingescannte Tabellen
 
-Version 1.3 rendert jede Seite vor OCR mit `pdftoppm` und prüft sie zunächst mit
-Tesseract OSD. Sichere 0°-/90°-/180°-/270°-Entscheidungen werden unmittelbar
-übernommen. Bei niedriger Konfidenz vergleicht die Pipeline alle vier Lagen mit
-einem kurzen OCR-Lauf. Ist auch dieser Vergleich nicht eindeutig, bleibt die
-Seite unverändert und die Konsole meldet `unsicher`.
+Seit Version 1.5.4 ist die schnelle Verarbeitung Standard: OCRmyPDFs eigene
+automatische Seitendrehung bleibt aktiv, die zusätzliche Tesseract-Vorprüfung
+ist ausgeschaltet. Das vermeidet das vorherige Rendern jeder Seite sowie bei
+unsicheren Seiten vier kurze Vergleichs-OCR-Läufe.
 
-Jede Entscheidung wird unter `ocrDiagnostics.pageOrientations` im Journal
-gespeichert. Vor einem Gesamtlauf müssen insbesondere gedrehte und unsichere
-Seiten in einem Dry-Run fachlich kontrolliert werden. Bleibt die Automatik bei
-einer bekannten Seite falsch oder unsicher, wird die Lage ausdrücklich in der
-temporären OCR-Arbeitskopie vorgegeben:
+Bleibt eine schwierige Seite im Dry-Run falsch ausgerichtet, aktiviert
+`--auto-orient-pages` die Vorprüfung aus Version 1.3. Sie rendert jede Seite mit
+`pdftoppm`, prüft sie mit Tesseract OSD und vergleicht bei niedriger Konfidenz
+0°, 90°, 180° und 270°. Die Entscheidungen werden unter
+`ocrDiagnostics.pageOrientations` im Journal gespeichert. Bleibt auch diese
+Automatik falsch oder unsicher, wird die fachlich bekannte Lage ausdrücklich in
+der temporären OCR-Arbeitskopie vorgegeben:
 
 ```bash
 --force-rotate-page 1:+90
@@ -81,6 +82,15 @@ temporären OCR-Arbeitskopie vorgegeben:
 Die Seitennummer ist einsbasiert, `+90` bedeutet im Uhrzeigersinn. Die
 manuelle Vorgabe hat Vorrang vor der Automatik. Die CDN-Originaldatei wird dabei
 weder überschrieben noch neu hochgeladen.
+
+Auch die Data-Matrix-Prüfung rendert im schnellen Standard nur einmal mit
+300 dpi. Bei einem erwarteten, aber nicht erkannten Medikationsplan wird der
+gezielte Dry-Run mit `--barcode-retry-dpi 600` wiederholt. Beide robusten
+Rückfallprüfungen lassen sich kombinieren:
+
+```bash
+--auto-orient-pages --barcode-retry-dpi 600
+```
 
 ### Fortschrittsausgabe prüfen
 

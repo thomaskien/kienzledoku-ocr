@@ -163,7 +163,7 @@ class PipelineTests(unittest.TestCase):
                 }.issubset(records[1]["timingsSeconds"])
             )
             self.assertIn("----- BEGINN kienzledoku OCR -----", aps.text)
-            self.assertIn("kienzledoku OCR v1.5.3,", aps.text)
+            self.assertIn("kienzledoku OCR v1.5.4,", aps.text)
             self.assertTrue(aps.text.endswith("----- ENDE kienzledoku OCR -----"))
 
     def test_existing_marker_skips_download_and_ocr(self):

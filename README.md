@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version 1.5.3 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
+Version 1.5.4 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
 
@@ -17,7 +17,9 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - Ein Dokumentfehler wird journalisiert; anschließend läuft der Batch mit dem nächsten Dokument weiter.
 - Bereits vorhandene Marker `kienzledoku OCR v…` verhindern standardmäßig Doppelanhänge.
 - Version 1.1 grenzt jeden neuen OCR-Anteil mit festen BEGINN-/ENDE-Markern ab. `--reprocess` ersetzt den Block gezielt, statt ihn erneut anzuhängen.
-- Seit Version 1.3 wird die Orientierung jeder PDF-Seite vor OCR geprüft; nur eine temporäre Arbeitskopie wird gedreht und die Entscheidung journalisiert.
+- Version 1.3 führte eine zusätzliche Tesseract-Orientierungsprüfung jeder
+  PDF-Seite ein. Seit Version 1.5.4 ist diese langsame Vorprüfung optional;
+  OCRmyPDFs automatische Seitendrehung bleibt standardmäßig aktiv.
 - Version 1.5 liest BMP-Data-Matrix und PZN-Daten ausschließlich lokal aus der aktiven T2med-AMDB; die Data-Matrix-Rohdaten werden nicht in das Journal geschrieben.
 - Schreibvorgänge laufen bewusst nicht parallel.
 
@@ -33,7 +35,7 @@ Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe au
 - lokaler, ausschließlich lesender Zugriff auf T2meds MariaDB-AMDB über den
   mitgelieferten Client und Socket
 
-Das Standardbackend entspricht der bestätigten KienzleFax-Pipeline: OCRmyPDF/Tesseract mit `deu+eng`, OEM 1, Seitendrehung, Entzerrung, Reinigung, 300-dpi-Oversampling, PDF/A-3, Optimierung 1, 300 Sekunden Tesseract-Zeitlimit je Seite und zwei internen Jobs. Davor prüft Version 1.3 jede Seite mit Tesseract OSD. Ist die Lage nicht eindeutig, werden 0°, 90°, 180° und 270° anhand eines kurzen OCR-Laufs verglichen. Nur eine ausreichend deutliche Entscheidung wird auf die temporäre Arbeitskopie angewandt. Seiten ohne Textschicht werden durch Tesseract erkannt; bei Seiten mit vorhandenem PDF-Text bleibt dieser erhalten und wird nicht unnötig erneut OCR-erkannt. Anschließend liest `pdftotext` den vorhandenen und den neu erkannten Text gemeinsam und ohne Steuerzeichen für Seitenumbrüche aus dem temporären OCR-PDF. Diese Arbeitsdateien werden verworfen; die T2med-CDN-Datei wird nicht verändert.
+Das Standardbackend entspricht der bestätigten KienzleFax-Pipeline: OCRmyPDF/Tesseract mit `deu+eng`, OEM 1, Seitendrehung, Entzerrung, Reinigung, 300-dpi-Oversampling, PDF/A-3, Optimierung 1, 300 Sekunden Tesseract-Zeitlimit je Seite und zwei internen Jobs. Seiten ohne Textschicht werden durch Tesseract erkannt; bei Seiten mit vorhandenem PDF-Text bleibt dieser erhalten und wird nicht unnötig erneut OCR-erkannt. Anschließend liest `pdftotext` den vorhandenen und den neu erkannten Text gemeinsam und ohne Steuerzeichen für Seitenumbrüche aus dem temporären OCR-PDF. Seit Version 1.5.4 ist die zusätzliche Tesseract-OSD-/Vierfachprüfung aus Geschwindigkeitsgründen standardmäßig ausgeschaltet; OCRmyPDFs eigene automatische Seitendrehung bleibt aktiv. Alle Arbeitsdateien werden verworfen; die T2med-CDN-Datei wird nicht verändert.
 
 Auf Debian/Raspberry Pi OS werden dieselben Pakete wie bei KienzleFax benötigt:
 
@@ -87,14 +89,16 @@ Resolver erzeugt ausschließlich `SELECT` und greift nie direkt auf `.ibd`- oder
 `.frm`-Dateien zu. Die Pfade können nötigenfalls mit `--amdb-config`,
 `--amdb-client` und `--amdb-socket` angepasst werden. Ist die T2med-AMDB nicht
 erreichbar oder schlägt eine PZN-Abfrage fehl, meldet das Programm dies und lässt
-die betroffene Seite sicher in der normalen OCR. Die Data-Matrix-Erkennung
-arbeitet standardmäßig mit 300 dpi und versucht eine nicht erkannte Seite erneut
-mit 600 dpi (`--barcode-dpi` und `--barcode-retry-dpi`).
+die betroffene Seite sicher in der normalen OCR. Die Data-Matrix-Erkennung der
+Backfill-Pipeline arbeitet seit Version 1.5.4 standardmäßig einmalig mit 300 dpi.
+Für schwer erkennbare Codes aktiviert `--barcode-retry-dpi 600` gezielt einen
+zweiten PDF-Renderdurchlauf. `--barcode-dpi` ändert die erste Auflösung;
 `--no-medication-plan-codes` deaktiviert diese Funktion.
 
 Der unabhängige, fachlich neutrale Extraktor unterstützt PDF, PNG, JPEG und
 mehrseitiges TIFF. Er gibt Rohdaten, UTF-8-Text soweit möglich, Base64, Seite und
-Position als JSON aus:
+Position als JSON aus. Seine eigenständige CLI behält den robusten
+600-dpi-Zweitversuch als Standard:
 
 ```bash
 python3 ./qr-extractor.py scan.pdf
@@ -102,7 +106,8 @@ python3 ./qr-extractor.py scan.pdf
 
 ## OCR-Backend
 
-Ohne zusätzliche Option wird das KienzleFax-OCRmyPDF-Backend verwendet. Seine Pfade und konservativen Ressourcenwerte können bei Bedarf angepasst werden:
+Ohne zusätzliche Option wird das KienzleFax-OCRmyPDF-Backend verwendet. Seine
+Pfade und Ressourcenwerte können bei Bedarf angepasst werden:
 
 ```bash
 --ocrmypdf /usr/bin/ocrmypdf \
@@ -117,14 +122,17 @@ Ohne zusätzliche Option wird das KienzleFax-OCRmyPDF-Backend verwendet. Seine P
 --tesseract-timeout 300
 ```
 
-`--orientation-confidence` steuert, ab welcher OSD-Konfidenz eine Lage direkt
-übernommen wird. Unterhalb des Standards `5` startet automatisch der
-Vierfachvergleich. `--rotate-pages-threshold` bleibt als nachgelagerte
-OCRmyPDF-Sicherung erhalten. Für Diagnosezwecke kann die neue Vorprüfung mit
-`--no-auto-orient-pages` deaktiviert werden.
+Standardmäßig übernimmt OCRmyPDF die automatische Seitendrehung. Die zusätzliche
+langsame Vorprüfung aus Version 1.3 wird bei schwierigen Dokumenten mit
+`--auto-orient-pages` aktiviert. Dann steuert `--orientation-confidence`, ab
+welcher OSD-Konfidenz eine Lage direkt übernommen wird; unterhalb des Standards
+`5` startet der Vierfachvergleich. `--rotate-pages-threshold` bleibt unabhängig
+davon als OCRmyPDF-Sicherung aktiv. `--no-auto-orient-pages` bleibt als
+ausdrückliche beziehungsweise abwärtskompatible Angabe verfügbar.
 
-Bei einem seitlich eingescannten, tabellarischen Dokument genügt seit Version
-1.3 normalerweise ein gezielter Neu-Lauf ohne manuelle Drehangabe:
+Bei einem seitlich eingescannten, tabellarischen Dokument wird zunächst ein
+gezielter Neu-Lauf mit dem schnellen Standard geprüft. Bleibt die OCR-Ausrichtung
+unzureichend, wird die zusätzliche Vorprüfung eingeschaltet:
 
 ```bash
 T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
@@ -132,12 +140,14 @@ T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
   --reprocess \
   --username t2user \
   --object-id OBJECTID_DES_DOKUMENTS \
+  --auto-orient-pages \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
   --insecure
 ```
 
-Die Konsole meldet für jede Seite Lage, Methode und Konfidenz. Bleibt eine Seite
-als `unsicher` bei 0°, lässt sich die fachlich bekannte Lage weiterhin
+Bei aktivierter Vorprüfung meldet die Konsole für jede Seite Lage, Methode und
+Konfidenz. Bleibt eine Seite als `unsicher` bei 0°, lässt sich die fachlich
+bekannte Lage weiterhin
 ausschließlich in der temporären OCR-Arbeitskopie vorgeben:
 
 ```bash
@@ -260,7 +270,7 @@ Neuverarbeitung kein bereits erfolgreiches Dokument übersprungen werden soll.
 ----- BEGINN kienzledoku OCR -----
 <vollständiger OCR-Text>
 
-kienzledoku OCR v1.5.3, 01.09.2026 10:00
+kienzledoku OCR v1.5.4, 01.09.2026 10:00
 ----- ENDE kienzledoku OCR -----
 ```
 

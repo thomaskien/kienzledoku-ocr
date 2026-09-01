@@ -33,7 +33,7 @@ class MedicationPlanScanner:
         amdb_timeout: float = 30.0,
         pdftoppm: str = "pdftoppm",
         dpi: int = 300,
-        retry_dpi: int = 600,
+        retry_dpi: int = 300,
         timeout: float = 300.0,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:

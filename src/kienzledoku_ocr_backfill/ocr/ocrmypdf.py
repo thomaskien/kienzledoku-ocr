@@ -104,7 +104,7 @@ class OcrmypdfBackend(OcrBackend):
         tesseract_timeout: float = 300.0,
         rotate_pages_threshold: float = 14.0,
         forced_page_rotations: Sequence[tuple[int, str]] = (),
-        auto_orient_pages: bool = True,
+        auto_orient_pages: bool = False,
         orientation_min_confidence: float = 5.0,
         medication_plan_codes: bool = True,
         amdb_config: Path = Path("/opt/t2med/server/mmi/service.conf"),
@@ -112,7 +112,7 @@ class OcrmypdfBackend(OcrBackend):
         amdb_socket: Path = Path("/var/opt/t2med/data/mariadb/t2med-mariadb"),
         amdb_timeout: float = 30.0,
         barcode_dpi: int = 300,
-        barcode_retry_dpi: int = 600,
+        barcode_retry_dpi: int = 300,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
         if jobs < 1:
