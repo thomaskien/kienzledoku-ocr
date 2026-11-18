@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.5.4"
+VERSION="2.0.0"
 
 readonly PACKAGES=(
   python3
+  xdg-utils
   ocrmypdf
   tesseract-ocr
   tesseract-ocr-deu
@@ -24,6 +25,7 @@ KienzleDoku OCR-Abhängigkeiten installieren oder prüfen.
 
 Verwendung:
   sudo ./scripts/install-ocr-dependencies.sh
+  sudo ./scripts/install-ocr-dependencies.sh --desktop
   ./scripts/install-ocr-dependencies.sh --check
   ./scripts/install-ocr-dependencies.sh --help
 
@@ -114,6 +116,11 @@ verify_dependencies() {
     fi
   fi
 
+  if [[ "$desktop" == yes ]]; then
+    command -v xdg-mime >/dev/null || failed=1
+    echo "Desktopprüfung ohne lokale T2med-AMDB. Ohne AMDB verwendet die BMP-Seite normale OCR."
+    return "$failed"
+  fi
   echo "Prüfe lokalen T2med-AMDB-Zugang (nur lesende Nutzung) ..."
   if [[ -x "$amdb_client" ]]; then
     printf '  [OK] T2med-MariaDB-Client: %s\n' "$amdb_client"
@@ -156,15 +163,15 @@ verify_dependencies() {
 
 main() {
   local mode="install"
+  local desktop=no
 
-  if (( $# > 1 )); then
-    usage >&2
-    return 2
-  fi
-  if (( $# == 1 )); then
+  while (( $# )); do
     case "$1" in
       --check)
         mode="check"
+        ;;
+      --desktop)
+        desktop=yes
         ;;
       -h|--help)
         usage
@@ -176,7 +183,8 @@ main() {
         return 2
         ;;
     esac
-  fi
+    shift
+  done
 
   echo "KienzleDoku OCR-Abhängigkeiten v${VERSION}"
   if [[ "$mode" == "check" ]]; then

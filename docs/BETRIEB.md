@@ -153,7 +153,7 @@ damaligen verifizierten `updated`-Eintrag enthält. Nur bei exakt passendem
 Nachweis, endet das Dokument mit `reprocess_conflict` und bleibt unverändert.
 
 ```bash
-T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py aps \
   --dry-run \
   --reprocess \
   --username t2user \

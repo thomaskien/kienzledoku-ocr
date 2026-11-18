@@ -1,5 +1,43 @@
 # KienzleDoku OCR-Backfill für T2med
 
+Version **2.0.0** startet unter Linux über `kienzleocr://`. Sie liest alle für den Aufruf sichtbaren Patienten über FHIR und legt für jeden PDF-Anhang mit ausstehendem OCR-Ergebnis einen eigenen Karteieintrag mit Kürzel **OCR** und dem ursprünglichen fachlichen Datum an. Auch bei durchsuchbaren PDFs wird der vorhandene Text für die Karteikarte extrahiert.
+
+### Erster Linux-Test
+
+Auf dem Linux-Rechner mit T2med-Desktop und Python ab 3.10 im Checkout ausführen. Die Registrierung gehört zum angemeldeten Desktopbenutzer. Die Basisadresse im Befehl muss mit der FHIR-Basis des T2med-Aufrufs übereinstimmen. Bei einer eigenen Praxis-CA deren PEM-Datei mit `--ca-file /pfad/zur/praxis-ca.pem` ergänzen.
+
+```bash
+sudo bash scripts/install-ocr-dependencies.sh --desktop
+python3 scripts/install-linux-handler.py --base-url https://127.0.0.1:16567/aps/fhir/api/r4
+xdg-mime query default x-scheme-handler/kienzleocr
+```
+
+Den privaten T2med-Produkt-API-Key am verdeckten Prompt eingeben. Erwartete Registrierung ist `kienzleocr.desktop`. In der T2med-Drittanbieterkonfiguration folgende Aufruf-URL hinterlegen und aus T2med starten:
+
+```text
+kienzleocr://start?kontextId=${kontextId}&fhirBasisUrl=${fhirBasisUrl}&oAuthToken=${oAuthToken}
+```
+
+Der erste Start verarbeitet den gesamten sichtbaren Bestand als Dry-Run. Im Terminal erscheinen Patient, Dokument, Originaldatum, Laufzeit und Ergebnis. Eine Begrenzung für einzelne Tests ist bei der Registrierung mit `--limit 5` oder `--patient FHIR-ID` möglich. Die Patientenliste wird wie in der Asterisk-Middleware paginiert und gegen die FHIR-Gesamtzahl geprüft. Pro Patient lädt der Client die eAkte über `Patient/{id}/$eakte`, folgt den Dokumentverweisen und liest die PDF-Anhänge wie in der Befundwand. Ohne lokalen Zugriff auf die T2med-AMDB greift für Medikationsplanseiten die vorhandene OCR-Rückfallverarbeitung.
+
+**Schreibtest.** Nach Kontrolle des Dry-Runs den Handler für einen begrenzten Test registrieren und den Aufruf in T2med wiederholen:
+
+```bash
+python3 scripts/install-linux-handler.py --apply --limit 1
+```
+
+Für den gesamten Schreiblauf den Handler mit `--apply` allein registrieren. Ein Aufruf des Installers ohne Laufoptionen setzt den vollständigen Dry-Run. Das Programm übernimmt Arztrolle und Behandlungsort aus dem Startkontext. Bei einem anderen Patienten mit ausstehendem Ergebnis legt es über `POST /Encounter` einen Kontext für diesen Patienten an und prüft Patient, Arztrolle und Ort vor dem ersten Text-POST. Die Kontextanlage setzt T2med ab 26.10 und eine entsprechende Freigabe voraus. Falls der Deep-Link-Bearer keine Kontextanlage erlaubt, die für den Batch dokumentierte Geräteanmeldung verwenden: bei der Registrierung zusätzlich `--client-id EIGENE_OAUTH_CLIENT_ID` angeben. Bei einem Apply-Lauf mit Client-ID fragt das Terminal das zugehörige Client-Secret ab und zeigt den Anmeldelink. Die genaue Einrichtung beschreibt der [T2med-Integrationsleitfaden](https://github.com/T2med/fhir-demoapplication/blob/main/Integrationsleitfaden-FHIR-API.md).
+
+**Datierung und Wiederanlauf.** Vorrang hat das Datum des Akteneintrags (`Composition.date`), ersatzweise das Erstellungsdatum des Anhangs und dann `DocumentReference.date`. Fehlende oder widersprüchliche Originaldaten führen zum Dokumentfehler. Als vorhandene OCR zählen die bisherigen KienzleDoku-Marker am Quelldokument und die zu diesem Anhang gehörenden neuen OCR-Einträge. Die Herkunftskennung berücksichtigt Patient, Dokumentverweis, Anhangsposition und PDF-Hash. Eigener Freitext oder ein zeitgleiches zweites Dokument zählen jeweils separat.
+
+Vor dem POST schreibt das Programm die Herkunftskennung, Prüfsummen und das Originaldatum ins lokale Journal. Es kontrolliert anschließend OCR-Text, fachliches Datum und Patient in der eAkte. Nach unterbrochener Antwort gleicht ein neuer Lauf den offenen Journaleintrag mit der Akte ab. Bei `unconfirmed` den betreffenden Eintrag in T2med prüfen. Für den Batch denselben Desktopbenutzer und dasselbe Journal verwenden und auf einem Rechner zur Zeit ausführen. Die lokale Sperre gilt je Journal. Läuft der Token ab, aus T2med erneut starten.
+
+Die geschützte Konfiguration liegt unter `~/.config/kienzleocr/config.json`, das Journal unter `~/.local/state/kienzleocr/fhir.jsonl` (XDG-Verzeichnisse werden berücksichtigt). Der Deep Link enthält einen temporären Bearer-Token und gehört nicht in Befehlsverlauf, Tickets oder Logs. Die CLI-Hilfe ist über `python3 ./kienzledoku-ocr.py --help` verfügbar.
+
+## Bisheriger APS-Betrieb
+
+Die folgenden Abschnitte beschreiben den weiterhin explizit über `aps` aufrufbaren Vorgänger. Sein Journal und Rollback beziehen sich auf Updates bestehender Dokumentverweise.
+
 Version 1.5.4 verarbeitet T2med-PDF-Dokumentverweise (`classid = 60`) seriell. Das Programm liest das Inventar ausschließlich aus PostgreSQL, lädt die unveränderte Originaldatei über das CDN, gewinnt Text über ein austauschbares OCR-Backend und ergänzt nur das APS-Feld `text` des bestehenden Dokumentverweises. Bundesmedikationspläne werden an ihrer Data Matrix erkannt und strukturiert ausgegeben, statt die betroffene Seite zu OCR-erkennen.
 
 Ohne `--apply` läuft das Programm immer als Dry-Run. Direkte Schreibzugriffe auf PostgreSQL und Änderungen an CDN-Dateien sind nicht implementiert.
@@ -135,7 +173,7 @@ gezielter Neu-Lauf mit dem schnellen Standard geprüft. Bleibt die OCR-Ausrichtu
 unzureichend, wird die zusätzliche Vorprüfung eingeschaltet:
 
 ```bash
-T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py aps \
   --dry-run \
   --reprocess \
   --username t2user \
@@ -151,7 +189,7 @@ bekannte Lage weiterhin
 ausschließlich in der temporären OCR-Arbeitskopie vorgeben:
 
 ```bash
-T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py aps \
   --dry-run \
   --reprocess \
   --username t2user \
@@ -185,7 +223,7 @@ Alternativ kann der vollständige eigene Befehl in `KIENZLEDOKU_OCR_COMMAND` hin
 ## Start aus dem Repository
 
 ```bash
-python3 ./kienzledoku-ocr.py --help
+python3 ./kienzledoku-ocr.py aps --help
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
@@ -193,7 +231,7 @@ Eine Installation ist nicht erforderlich. Optional ist eine lokale Paketinstalla
 
 ```bash
 python3 -m pip install .
-kienzledoku-ocr --help
+kienzledoku-ocr aps --help
 ```
 
 ## Zugangsdaten
@@ -205,7 +243,7 @@ Der Benutzername kann mit `--username` oder `T2MED_OCR_USERNAME` gesetzt werden.
 Zuerst ausschließlich das bestätigte Testobjekt `test5.pdf` als Dry-Run ausführen:
 
 ```bash
-python3 ./kienzledoku-ocr.py \
+python3 ./kienzledoku-ocr.py aps \
   --dry-run \
   --object-id 003ce75054486374405bdf673254f82ffa90 \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
@@ -217,7 +255,7 @@ python3 ./kienzledoku-ocr.py \
 Nach Kontrolle des Dry-Runs wird genau dieses Objekt bewusst geschrieben:
 
 ```bash
-python3 ./kienzledoku-ocr.py \
+python3 ./kienzledoku-ocr.py aps \
   --apply \
   --object-id 003ce75054486374405bdf673254f82ffa90 \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
@@ -228,13 +266,13 @@ Danach schrittweise erweitern:
 
 ```bash
 # Kleine Teilmenge, weiterhin Dry-Run
-python3 ./kienzledoku-ocr.py --dry-run --limit 10 [Verbindungs- und OCR-Optionen]
+python3 ./kienzledoku-ocr.py aps --dry-run --limit 10 [Verbindungs- und OCR-Optionen]
 
 # Ein Patient
-python3 ./kienzledoku-ocr.py --apply --patient 8100 [Verbindungs- und OCR-Optionen]
+python3 ./kienzledoku-ocr.py aps --apply --patient 8100 [Verbindungs- und OCR-Optionen]
 
 # Gesamtlauf mit Wiederaufnahme
-python3 ./kienzledoku-ocr.py --apply --resume [Verbindungs- und OCR-Optionen]
+python3 ./kienzledoku-ocr.py aps --apply --resume [Verbindungs- und OCR-Optionen]
 ```
 
 ## Erneute OCR mit einer neuen Version
@@ -249,7 +287,7 @@ Andernfalls meldet das Programm `reprocess_conflict` und schreibt nichts.
 Zuerst als Dry-Run über die gewünschte Menge:
 
 ```bash
-T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py \
+T2MED_OCR_PASSWORD='' python3 ./kienzledoku-ocr.py aps \
   --dry-run \
   --reprocess \
   --username t2user \
@@ -330,7 +368,7 @@ Wichtige Statuswerte sind `dry_run`, `update_prepared`, `updated`, `already_ocr`
 Ohne `--apply` prüft der Rollback nur die Kandidaten:
 
 ```bash
-python3 ./kienzledoku-ocr.py --rollback --dry-run \
+python3 ./kienzledoku-ocr.py aps --rollback --dry-run \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
   --insecure
 ```
@@ -338,7 +376,7 @@ python3 ./kienzledoku-ocr.py --rollback --dry-run \
 Die tatsächliche Rücksetzung erfolgt explizit:
 
 ```bash
-python3 ./kienzledoku-ocr.py --rollback --apply \
+python3 ./kienzledoku-ocr.py aps --rollback --apply \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
   --insecure
 ```

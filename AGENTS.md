@@ -3,7 +3,8 @@
 ## Schutzregeln
 
 - PostgreSQL ausschließlich für `SELECT`/Inventarisierung verwenden. Nie `UPDATE`, `INSERT` oder `DELETE` gegen T2med-Tabellen.
-- T2med-Schreibvorgänge ausschließlich über den bestätigten APS-Updateendpoint ausführen.
+- Im APS-Altbetrieb Updates ausschließlich über den bestätigten APS-Updateendpoint ausführen.
+- Im FHIR-Betrieb neue OCR-Freitexte seriell mit Originaldatum und geprüftem Patientenkontext anlegen. Für Patientenwechsel die FHIR-Kontextanlage verwenden. Vor der Textanlage fsync-sicher journalisieren und den Text im Anschluss in der zugehörigen Akte verifizieren.
 - CDN-Originaldateien nie verändern oder neu hochladen.
 - Vor jedem Update das vollständige aktuelle DTO lesen, nur `text` ändern und das vollständige DTO zurücksenden.
 - Vor dem Update `oldText` fsync-sicher journalisieren; nach dem Update erneut lesen und verifizieren.

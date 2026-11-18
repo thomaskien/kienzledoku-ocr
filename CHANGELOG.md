@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0 – 18.11.2026
+
+- Linux-Registrierung für `kienzleocr://` mit vollständigem patientenübergreifenden FHIR-Dry-Run.
+- Patienteninventar nach Asterisk-Middleware, eAkte und PDF-Anhänge nach Befundwand.
+- Neue OCR-Freitexte mit Originaldatum, bestätigter Patientenzuordnung, Journal und Dublettenprüfung. Vorhandene OCR-Markierungen aus 1.x werden berücksichtigt.
+- Der bisherige CLI-Betrieb mit APS einschließlich Rollback ist über das Unterkommando `aps` erreichbar.
+
 ## 1.5.4 – 01.09.2026
 
 - Nach zwei Messläufen bestätigte schnelle Standardpipeline: Data-Matrix-Prüfung

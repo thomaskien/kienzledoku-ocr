@@ -15,13 +15,13 @@ Empfohlene Reihenfolge:
 
 ```bash
 # Nur prüfen
-python3 ./kienzledoku-ocr.py --rollback --dry-run \
+python3 ./kienzledoku-ocr.py aps --rollback --dry-run \
   --object-id OBJECTID \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
   --insecure
 
 # Genau einen konfliktfreien Eintrag zurücksetzen
-python3 ./kienzledoku-ocr.py --rollback --apply \
+python3 ./kienzledoku-ocr.py aps --rollback --apply \
   --object-id OBJECTID \
   --journal /var/lib/kienzledoku-ocr/backfill.jsonl \
   --insecure

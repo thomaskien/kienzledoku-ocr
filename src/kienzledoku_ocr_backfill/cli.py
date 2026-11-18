@@ -423,8 +423,12 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] != ["aps"]:
+        from .fhir_cli import main as fhir_main
+        return fhir_main(argv[1:] if argv[:1] == ["fhir"] else argv)
     try:
-        return run(parse_args(argv))
+        return run(parse_args(argv[1:]))
     except (BackfillError, RuntimeError, OSError) as exc:
         TimestampedReporter(lambda message: print(message, file=sys.stderr))(
             f"FEHLER: {exc}"
