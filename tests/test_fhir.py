@@ -238,3 +238,15 @@ class BatchTests(unittest.TestCase):
             self.assertIn('"--apply"', desktop.read_text())
             self.assertEqual((Path(self.tmp.name) / "kienzleocr/config.json").stat().st_mode & 0o777, 0o600)
             register.assert_called_with(["xdg-mime", "default", desktop.name, "x-scheme-handler/kienzleocr"], check=True)
+            profile = {"url": "https://amdb.invalid", "token": "amdb-test-token", "ca_pem": "test-cert"}
+            config = Path(self.tmp.name) / "kienzleocr/config.json"
+            with patch.object(handler, "load_amdb_profile", return_value=profile):
+                handler.main(["--amdb-profile", "/private/profile.json"])
+                handler.main(["--limit", "1"])
+                self.assertEqual(json.loads(config.read_text())["amdb_remote"], profile)
+                self.assertNotIn(profile["token"], desktop.read_text())
+                handler.main(["--local-amdb"])
+                self.assertNotIn("amdb_remote", json.loads(config.read_text()))
+                handler.main(["--amdb-profile", "/private/profile.json"])
+                handler.main(["--base-url", BASE.replace("test.invalid", "other.invalid")])
+                self.assertNotIn("amdb_remote", json.loads(config.read_text()))

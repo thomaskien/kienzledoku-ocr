@@ -1,0 +1,21 @@
+[Unit]
+Description=kienzleOCR PZN-Auskunft
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=kienzleocr-amdb
+Group=kienzleocr-amdb
+WorkingDirectory=/usr/local/lib/kienzleocr-amdb
+EnvironmentFile=/etc/kienzleocr-amdb/identity/listen.env
+ExecStart=/usr/bin/gunicorn --bind ${AMDB_LISTEN} --workers 2 --timeout 60 --certfile /etc/kienzleocr-amdb/identity/server.crt --keyfile /etc/kienzleocr-amdb/identity/server.key kienzledoku_ocr_backfill.amdb_service:from_server_config()
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

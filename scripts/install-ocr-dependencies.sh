@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 
 readonly PACKAGES=(
   python3
@@ -118,7 +118,7 @@ verify_dependencies() {
 
   if [[ "$desktop" == yes ]]; then
     command -v xdg-mime >/dev/null || failed=1
-    echo "Desktopprüfung ohne lokale T2med-AMDB. Ohne AMDB verwendet die BMP-Seite normale OCR."
+    echo "Desktopprüfung abgeschlossen. Remote-PZN-Zugang mit t2med-amdb.py --remote-profile PROFIL info prüfen."
     return "$failed"
   fi
   echo "Prüfe lokalen T2med-AMDB-Zugang (nur lesende Nutzung) ..."

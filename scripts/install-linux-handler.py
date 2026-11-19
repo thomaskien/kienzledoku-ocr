@@ -11,6 +11,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kienzledoku_ocr_backfill.amdb_remote import load_amdb_profile
 from kienzledoku_ocr_backfill.fhir_client import safe_url
 from kienzledoku_ocr_backfill.fhir_model import valid_id
 
@@ -45,6 +46,9 @@ def save(path, text):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", help="Freigegebene HTTPS-FHIR-Basis (bei Ersteinrichtung erforderlich)")
+    amdb = parser.add_mutually_exclusive_group()
+    amdb.add_argument("--amdb-profile", type=Path, help="HTTPS-Arbeitsplatzprofil des PZN-Dienstes importieren")
+    amdb.add_argument("--local-amdb", action="store_true", help="Wieder die lokale AMDB verwenden")
     parser.add_argument("--ca-file", type=Path, help="PEM-Zertifizierungsstelle des T2med-Servers")
     parser.add_argument("--client-id", help="T2med OAuth Client-ID für Geräteanmeldung beim Schreiblauf")
     parser.add_argument("--change-key", action="store_true")
@@ -66,6 +70,10 @@ def main(argv=None):
     if cfg.get("base_url", base) != base:
         cfg = {}
     cfg["base_url"] = base
+    if args.amdb_profile:
+        cfg["amdb_remote"] = load_amdb_profile(args.amdb_profile)
+    elif args.local_amdb:
+        cfg.pop("amdb_remote", None)
     if args.ca_file:
         cfg["ca_file"] = str(args.ca_file.resolve(strict=True))
     if args.client_id:

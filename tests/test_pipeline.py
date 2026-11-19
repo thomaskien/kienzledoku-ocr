@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from kienzledoku_ocr_backfill import __version__
 from kienzledoku_ocr_backfill.errors import MissingCdnError
 from kienzledoku_ocr_backfill.handlers.document_reference import DocumentReferenceHandler
 from kienzledoku_ocr_backfill.journal import Journal
@@ -163,7 +164,7 @@ class PipelineTests(unittest.TestCase):
                 }.issubset(records[1]["timingsSeconds"])
             )
             self.assertIn("----- BEGINN kienzledoku OCR -----", aps.text)
-            self.assertIn("kienzledoku OCR v2.0.0,", aps.text)
+            self.assertIn(f"kienzledoku OCR v{__version__},", aps.text)
             self.assertTrue(aps.text.endswith("----- ENDE kienzledoku OCR -----"))
 
     def test_existing_marker_skips_download_and_ocr(self):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import json
 import os
 import re
@@ -41,6 +42,19 @@ def read_service_config(path: str | Path) -> dict[str, str]:
     return values
 
 
+def describe_drug(drug: dict) -> str:
+    details = [drug["name"] or "Name fehlt"]
+    for entry in drug["substances"]:
+        if entry["name"]:
+            details.append(f"Wirkstoff {entry['name']}")
+        if entry["strength"]:
+            details.append(f"Stärke {entry['strength']}")
+    form = drug["form_long"] or drug["form_short"]
+    if form:
+        details.append(f"Form {form}")
+    return " | ".join(details)
+
+
 class T2medAmdbResolver:
     """Resolve PZN through MEDPLAN_PACKAGE in a read-only MariaDB transaction."""
 
@@ -50,6 +64,7 @@ class T2medAmdbResolver:
         config_path: str | Path = DEFAULT_CONFIG,
         client_path: str | Path = DEFAULT_CLIENT,
         socket_path: str | Path = DEFAULT_SOCKET,
+        db_user: Optional[str] = None,
         timeout: float = 30.0,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
@@ -58,6 +73,7 @@ class T2medAmdbResolver:
         self.config_path = Path(config_path)
         self.client_path = Path(client_path)
         self.socket_path = Path(socket_path)
+        self.db_user = db_user
         self.timeout = timeout
         self._progress = progress or (lambda message: None)
         self._metadata: Optional[dict[str, Any]] = None
@@ -82,6 +98,7 @@ class T2medAmdbResolver:
         query = f"START TRANSACTION READ ONLY;\n{statement};\nROLLBACK;"
         command = [
             str(self.client_path),
+            *(["--no-defaults", f"--user={self.db_user}"] if self.db_user else []),
             "--protocol=SOCKET",
             f"--socket={self.socket_path}",
             f"--database={self.schema}",
@@ -197,14 +214,7 @@ class T2medAmdbResolver:
             "components": [],
         }
         self._cache[normalized] = resolved
-        details = [name or "Name fehlt"]
-        if substance:
-            details.append(f"Wirkstoff {substance}")
-        if strength:
-            details.append(f"Stärke {strength}")
-        if medication_form or ifa_form:
-            details.append(f"Form {medication_form or ifa_form}")
-        self._progress(f"T2med-AMDB: PZN {normalized}: " + " | ".join(details))
+        self._progress(f"T2med-AMDB: PZN {normalized}: " + describe_drug(resolved))
         return resolved
 
     def close(self) -> None:
@@ -222,6 +232,7 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="PZN ausschließlich lesend in der aktiven T2med-AMDB auflösen"
     )
+    parser.add_argument("--remote-profile", type=Path, help="HTTPS-Profil des PZN-Dienstes")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--client", type=Path, default=DEFAULT_CLIENT)
     parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
@@ -232,13 +243,15 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
     lookup_parser.add_argument("pzn", nargs="+")
     args = parser.parse_args(argv)
     try:
-        with T2medAmdbResolver(
-            config_path=args.config,
-            client_path=args.client,
-            socket_path=args.socket,
-            timeout=args.timeout,
-            progress=lambda message: print(message, file=sys.stderr),
-        ) as resolver:
+        progress = lambda message: print(message, file=sys.stderr)
+        if args.remote_profile:
+            from .amdb_remote import RemoteAmdbResolver, load_amdb_profile
+            resolver = RemoteAmdbResolver(load_amdb_profile(args.remote_profile), timeout=args.timeout, progress=progress)
+        else:
+            resolver = T2medAmdbResolver(config_path=args.config, client_path=args.client,
+                                         socket_path=args.socket, timeout=args.timeout, progress=progress)
+        with closing(resolver):
+            resolver.metadata()
             if args.command == "info":
                 print(json.dumps(resolver.metadata(), ensure_ascii=False, indent=2))
             else:

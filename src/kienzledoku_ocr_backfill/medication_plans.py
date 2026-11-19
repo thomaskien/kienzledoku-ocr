@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .bmp import BmpParseError, format_bmp, parse_bmp
+from .amdb_remote import RemoteAmdbResolver
+from .errors import OcrError
+from .bmp import BmpMedication, BmpParseError, format_bmp, parse_bmp
 from .qr_extractor import extract_qr_codes
 from .t2med_amdb import (
     DEFAULT_CLIENT,
@@ -27,6 +29,7 @@ class MedicationPlanScanner:
     def __init__(
         self,
         *,
+        amdb_remote: Optional[dict] = None,
         amdb_config: Path = DEFAULT_CONFIG,
         amdb_client: Path = DEFAULT_CLIENT,
         amdb_socket: Path = DEFAULT_SOCKET,
@@ -37,6 +40,7 @@ class MedicationPlanScanner:
         timeout: float = 300.0,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
+        self._amdb_remote = amdb_remote
         self._amdb_config = amdb_config
         self._amdb_client = amdb_client
         self._amdb_socket = amdb_socket
@@ -61,6 +65,7 @@ class MedicationPlanScanner:
             "pagesScanned": extracted.pages_scanned,
             "errors": list(extracted.errors),
             "plans": [],
+            "amdbMode": "https" if self._amdb_remote is not None else "local",
             "amdbConfig": str(self._amdb_config),
             "amdbClient": str(self._amdb_client),
             "amdbSocket": str(self._amdb_socket),
@@ -103,16 +108,22 @@ class MedicationPlanScanner:
             if plan is not None:
                 parsed_plans.append((code, plan))
 
-        resolver: Optional[T2medAmdbResolver] = None
-        if parsed_plans:
+        resolver = None
+        needs_pzn = any(isinstance(entry, BmpMedication) and entry.pzn
+                        for _, plan in parsed_plans for section in plan.sections for entry in section.entries)
+        if needs_pzn:
             try:
-                resolver = T2medAmdbResolver(
-                    config_path=self._amdb_config,
-                    client_path=self._amdb_client,
-                    socket_path=self._amdb_socket,
-                    timeout=self._amdb_timeout,
-                    progress=self._progress,
-                )
+                if self._amdb_remote is not None:
+                    resolver = RemoteAmdbResolver(self._amdb_remote, timeout=self._amdb_timeout,
+                                                  progress=self._progress)
+                else:
+                    resolver = T2medAmdbResolver(
+                        config_path=self._amdb_config,
+                        client_path=self._amdb_client,
+                        socket_path=self._amdb_socket,
+                        timeout=self._amdb_timeout,
+                        progress=self._progress,
+                    )
                 metadata = resolver.metadata()
                 diagnostics["amdbAvailable"] = True
                 diagnostics["amdbSchema"] = metadata.get("schema")
@@ -124,6 +135,8 @@ class MedicationPlanScanner:
                 self._progress(f"T2med-Arzneimitteldatenbank nicht verfügbar: {exc}")
                 if resolver is not None:
                     resolver.close()
+                if self._amdb_remote is not None:
+                    raise OcrError(f"Medikationsplan bleibt ausstehend: {exc}") from exc
                 resolver = None
 
         pages: dict[int, list[str]] = {}
@@ -132,6 +145,9 @@ class MedicationPlanScanner:
                 try:
                     formatted = format_bmp(plan, resolver)
                 except Exception as exc:
+                    if self._amdb_remote is not None:
+                        self._progress(f"PZN-Abfrage fehlgeschlagen: {exc}")
+                        raise OcrError(f"Medikationsplan bleibt ausstehend: {exc}") from exc
                     diagnostics["errors"].append(
                         {
                             "page": code.page,

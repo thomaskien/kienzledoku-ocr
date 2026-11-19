@@ -107,6 +107,7 @@ class OcrmypdfBackend(OcrBackend):
         auto_orient_pages: bool = False,
         orientation_min_confidence: float = 5.0,
         medication_plan_codes: bool = True,
+        amdb_remote: Optional[dict] = None,
         amdb_config: Path = Path("/opt/t2med/server/mmi/service.conf"),
         amdb_client: Path = Path("/opt/t2med/server/mariadb/bin/mariadb"),
         amdb_socket: Path = Path("/var/opt/t2med/data/mariadb/t2med-mariadb"),
@@ -146,6 +147,7 @@ class OcrmypdfBackend(OcrBackend):
         self._auto_orient_pages = auto_orient_pages
         self._orientation_min_confidence = orientation_min_confidence
         self._medication_plan_codes = medication_plan_codes
+        self._amdb_remote = amdb_remote
         self._amdb_config = amdb_config
         self._amdb_client = amdb_client
         self._amdb_socket = amdb_socket
@@ -533,6 +535,7 @@ class OcrmypdfBackend(OcrBackend):
         if not self._medication_plan_codes:
             return MedicationPlanScan({}, 0, {"disabled": True})
         scanner = MedicationPlanScanner(
+            amdb_remote=self._amdb_remote,
             amdb_config=self._amdb_config,
             amdb_client=self._amdb_client,
             amdb_socket=self._amdb_socket,

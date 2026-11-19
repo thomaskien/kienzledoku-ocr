@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.0 – 19.11.2026
+
+- Linux-Arbeitsplätze können PZN über einen authentifizierten HTTPS-Dienst auf dem T2med-Server auflösen. Der Dienst fragt das aktive AMDB-Schema über den lokalen MariaDB-Socket lesend ab.
+- Der FHIR-Handler übernimmt das Arbeitsplatzprofil mit `--amdb-profile`. Bei einem Dienstausfall bleibt ein Dokument mit benötigter PZN-Abfrage für einen späteren Lauf ausstehend.
+
 ## 2.0.0 – 18.11.2026
 
 - Linux-Registrierung für `kienzleocr://` mit vollständigem patientenübergreifenden FHIR-Dry-Run.

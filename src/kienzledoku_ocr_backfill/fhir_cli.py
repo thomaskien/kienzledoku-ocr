@@ -68,7 +68,7 @@ def main(argv=None):
         tls = ssl.create_default_context(cafile=cfg.get("ca_file") or None)
         client = Client(base, token, cfg["api_key"], tls)
         ocr = OcrmypdfBackend(progress=report, auto_orient_pages=args.auto_orient_pages,
-                              barcode_retry_dpi=args.barcode_retry_dpi)
+                              barcode_retry_dpi=args.barcode_retry_dpi, amdb_remote=cfg.get("amdb_remote"))
         report(f"KienzleDoku OCR {__version__} – " + ("APPLY" if args.apply else "DRY-RUN"))
         with Journal(args.journal) as journal:
             run = Backfill(client, journal, ocr, report, apply=args.apply)

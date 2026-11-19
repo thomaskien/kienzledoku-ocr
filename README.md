@@ -1,6 +1,6 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version **2.0.0** startet unter Linux über `kienzleocr://`. Sie liest alle für den Aufruf sichtbaren Patienten über FHIR und legt für jeden PDF-Anhang mit ausstehendem OCR-Ergebnis einen eigenen Karteieintrag mit Kürzel **OCR** und dem ursprünglichen fachlichen Datum an. Auch bei durchsuchbaren PDFs wird der vorhandene Text für die Karteikarte extrahiert.
+Version **2.1.0** startet unter Linux über `kienzleocr://`. Sie liest alle für den Aufruf sichtbaren Patienten über FHIR und legt für jeden PDF-Anhang mit ausstehendem OCR-Ergebnis einen eigenen Karteieintrag mit Kürzel **OCR** und dem ursprünglichen fachlichen Datum an. Auch bei durchsuchbaren PDFs wird der vorhandene Text für die Karteikarte extrahiert.
 
 ### Erster Linux-Test
 
@@ -18,7 +18,7 @@ Den privaten T2med-Produkt-API-Key am verdeckten Prompt eingeben. Erwartete Regi
 kienzleocr://start?kontextId=${kontextId}&fhirBasisUrl=${fhirBasisUrl}&oAuthToken=${oAuthToken}
 ```
 
-Der erste Start verarbeitet den gesamten sichtbaren Bestand als Dry-Run. Im Terminal erscheinen Patient, Dokument, Originaldatum, Laufzeit und Ergebnis. Eine Begrenzung für einzelne Tests ist bei der Registrierung mit `--limit 5` oder `--patient FHIR-ID` möglich. Die Patientenliste wird wie in der Asterisk-Middleware paginiert und gegen die FHIR-Gesamtzahl geprüft. Pro Patient lädt der Client die eAkte über `Patient/{id}/$eakte`, folgt den Dokumentverweisen und liest die PDF-Anhänge wie in der Befundwand. Ohne lokalen Zugriff auf die T2med-AMDB greift für Medikationsplanseiten die vorhandene OCR-Rückfallverarbeitung.
+Der erste Start verarbeitet den gesamten sichtbaren Bestand als Dry-Run. Im Terminal erscheinen Patient, Dokument, Originaldatum, Laufzeit und Ergebnis. Eine Begrenzung für einzelne Tests ist bei der Registrierung mit `--limit 5` oder `--patient FHIR-ID` möglich. Die Patientenliste wird wie in der Asterisk-Middleware paginiert und gegen die FHIR-Gesamtzahl geprüft. Pro Patient lädt der Client die eAkte über `Patient/{id}/$eakte`, folgt den Dokumentverweisen und liest die PDF-Anhänge wie in der Befundwand. Für strukturierte Bundesmedikationspläne am Arbeitsplatz den PZN-Dienst auf dem T2med-Server einrichten und sein Profil am Arbeitsplatz importieren. [Einrichtung und Funktionstest](docs/AMDB-ARBEITSPLATZ.md)
 
 **Schreibtest.** Nach Kontrolle des Dry-Runs den Handler für einen begrenzten Test registrieren und den Aufruf in T2med wiederholen:
 
