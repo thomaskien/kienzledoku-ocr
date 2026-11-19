@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.1 – 19.11.2026
+
+- Der Praxis-Commander wählt lesbare Passagen im Zusammenhang aus. Zusammenhängender Zeichensalat wird durch einen einzigen Hinweis ersetzt, auch über Leerzeilen, Modellaufrufe und PDF-Seiten hinweg.
+- Die Ausgabeprüfung akzeptiert JSON in einem Markdown-Codeblock und prüft Abschluss, Schema und Bereichsgrenzen. In der Testdatei bleiben Faxkopf und Quellvermerk erhalten. Für den beschädigten Hauptteil erscheint genau ein Hinweis.
+
 ## 2.3.0 – 19.11.2026
 
 - Optionale OCR-Bereinigung im Praxis-Commander vor der FHIR-Textanlage. Das Modell kennzeichnet unleserliche Zeilen. Strukturierte BMP-Seiten werden direkt aus dem Code übernommen, auch wenn die lokale AMDB fehlt.

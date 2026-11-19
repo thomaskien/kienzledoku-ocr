@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
 
-from kienzledoku_ocr_backfill.commander import CommanderCleaner, GAP
+from kienzledoku_ocr_backfill.commander import CommanderCleaner, GAP, join_cleaned_pages
 from kienzledoku_ocr_backfill.errors import OcrError
 from kienzledoku_ocr_backfill.fhir_client import FhirError, SessionError
 from kienzledoku_ocr_backfill.fhir_device import device_client
@@ -85,22 +85,51 @@ class CleaningTests(unittest.TestCase):
     def result(self, value, finish="stop"):
         return {"choices":[{"message":{"content":value},"finish_reason":finish}]}
 
-    def test_no_new_clinical_text_or_lost_numbers_negation(self):
-        with patch.object(self.client, "_request", return_value=self.result('{"noise":[1,2,3,4]}')):
-            actual = self.client.clean_page("Befund\n]||~]~\n5 mg\nkein Hinweis",1)
-        self.assertEqual(actual, "Befund\n"+GAP+"\n5 mg\nkein Hinweis")
+    def test_missing_model_selection_keeps_clinical_values_and_negation(self):
+        source = "Befund\n]||~]~\n5 mg\nkein Hinweis\nSpO2 97 %\n97 %\n1-0-1"
+        with patch.object(self.client, "_request", return_value=self.result('{"lesbar":[]}')):
+            self.assertEqual(self.client.clean_page(source, 1), source.replace("]||~]~", GAP))
 
-    def test_invented_text_bad_ids_and_truncation_cannot_be_written(self):
-        for value, finish in [('{"noise":[100]}',"stop"),('{"noise":[true]}',"stop"),
-                              ('{"noise":[],"text":"Metoprolol"}',"stop"), ('{"noise":[]}',"length")]:
-            with patch.object(self.client, "_request", return_value=self.result(value,finish)), self.assertRaises(OcrError):
-                self.client.clean_page("Fiktiver Befund",1)
+    def test_one_marker_for_noise_across_blank_lines_while_preserving_original_spacing(self):
+        source = "\nFax OK\n3\n\nX|Z\n\n|0jo|\n\nB8 ao 00% |x]\n\nFine.\n"
+        answer = '```json\n{"lesbar":[[1,2],[6,6]]}\n```'
+        with patch.object(self.client, "_request", return_value=self.result(answer)):
+            self.assertEqual(self.client.clean_page(source, 1), "\nFax OK\n3\n\n" + GAP + "\n\nFine.\n")
 
-    def test_chunks_preserve_order_and_contents(self):
-        source = "\n".join("Fiktiver Befund" for _ in range(150)) + "\n" + "ü"*6001
-        with patch.object(self.client, "_request", return_value=self.result('{"noise":[]}')) as req:
-            self.assertEqual(self.client.clean_page(source,1),source)
-            self.assertEqual(req.call_count,3)
+    def test_distinct_unreadable_ranges_separated_by_legible_text(self):
+        source = "zx|\n\nVöllig unauffälliger Verlauf.\n\n||zz"
+        with patch.object(self.client, "_request", return_value=self.result('{"lesbar":[[2,2]]}')):
+            self.assertEqual(self.client.clean_page(source, 1), GAP + "\n\nVöllig unauffälliger Verlauf.\n\n" + GAP)
+
+    def test_invented_text_bad_ranges_and_truncation_cannot_be_written(self):
+        invalid = [
+            '{}', '{"lesbar":"alles"}', '{"lesbar":[[1,3]]}', '{"lesbar":[[0,1]]}',
+            '{"lesbar":[[true,1]]}', '{"lesbar":[[2,1]]}', '{"lesbar":[[1,2],[2,2]]}',
+            '{"lesbar":[[1]]}', '{"lesbar":[],"text":"Metoprolol"}', 'Davor: {"lesbar":[]}',
+        ]
+        for value, finish in [(text, "stop") for text in invalid] + [('{"lesbar":[]}', "length")]:
+            with self.subTest(value=value, finish=finish), patch.object(
+                self.client, "_request", return_value=self.result(value, finish)
+            ), self.assertRaises(OcrError):
+                self.client.clean_page("Muster\nNormal", 1)
+
+    def test_noise_across_request_boundaries_and_oversized_line_preserved(self):
+        oversized = "ü" * 6001
+        source = "\n".join(["xq|~"] * 300 + [oversized, "x|"])
+        with patch.object(self.client, "_request", return_value=self.result('{"lesbar":[]}')) as req:
+            self.assertEqual(self.client.clean_page(source, 1), GAP + "\n" + oversized + "\n" + GAP)
+            self.assertGreater(req.call_count, 1)
+
+    def test_fully_readable_text_preserved_byte_for_byte(self):
+        source = "État normal.\n\n  Valeur A  \n"
+        with patch.object(self.client, "_request", return_value=self.result('{"lesbar":[[1,2]]}')):
+            self.assertEqual(self.client.clean_page(source, 1), source)
+
+    def test_adjacent_page_markers_merge_and_structured_text_stays_intact(self):
+        pages = ["Kopf\n" + GAP + "\n", GAP, "", "  \n" + GAP + "\nVerlauf normal."]
+        self.assertEqual(join_cleaned_pages(pages).split(), ("Kopf " + GAP + " Verlauf normal.").split())
+        bmp = "----- BEGINN BUNDESMEDIKATIONSPLAN -----\nOriginaltext\n----- ENDE BUNDESMEDIKATIONSPLAN -----"
+        self.assertEqual(join_cleaned_pages([GAP, bmp, GAP]), "\n\n".join([GAP, bmp, GAP]))
 
     def test_bmp_replacement_skips_commander_in_mixed_pdf(self):
         from kienzledoku_ocr_backfill.ocr import OcrmypdfBackend

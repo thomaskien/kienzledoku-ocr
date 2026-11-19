@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
+from ..commander import join_cleaned_pages
 from ..errors import OcrError
 from ..medication_plans import MedicationPlanScan, MedicationPlanScanner
 from ..progress import timed_step
@@ -596,7 +597,7 @@ class OcrmypdfBackend(OcrBackend):
                     text = self._clean_page(text, page)
             if text:
                 parts.append(text)
-        return "\n\n".join(parts)
+        return join_cleaned_pages(parts) if self._clean_page else "\n\n".join(parts)
 
     def extract_text(self, path: Path, mime_type: str) -> str:
         self._last_orientation_decisions = []
@@ -732,6 +733,8 @@ class OcrmypdfBackend(OcrBackend):
                         "pdftotext-Ausgabe ist nicht UTF-8-kodiert"
                     ) from exc
             if self._clean_page:
-                text = "\n\n".join(self._clean_page(page_text, page)
-                                   for page, page_text in enumerate(text.split("\f"), 1) if page_text.strip())
+                text = join_cleaned_pages(
+                    self._clean_page(page_text, page)
+                    for page, page_text in enumerate(text.split("\f"), 1) if page_text.strip()
+                )
             return text

@@ -1,8 +1,8 @@
 # KienzleDoku OCR-Backfill für T2med
 
-Version **2.3.0** startet unter Linux über `kienzleocr://`. Sie liest alle für den Aufruf sichtbaren Patienten über FHIR und legt für jeden PDF-Anhang mit ausstehendem OCR-Ergebnis einen eigenen Karteieintrag mit Kürzel **OCR** und dem ursprünglichen fachlichen Datum an. Auch bei durchsuchbaren PDFs wird der vorhandene Text für die Karteikarte extrahiert.
+Version **2.3.1** startet unter Linux über `kienzleocr://`. Sie liest alle für den Aufruf sichtbaren Patienten über FHIR und legt für jeden PDF-Anhang mit ausstehendem OCR-Ergebnis einen eigenen Karteieintrag mit Kürzel **OCR** und dem ursprünglichen fachlichen Datum an. Auch bei durchsuchbaren PDFs wird der vorhandene Text für die Karteikarte extrahiert.
 
-Für den bereits eingerichteten Arbeitsplatz beschreibt die Testanleitung das Update, die Vorschau und die Geräteanmeldung für mehrstündige Läufe. [Linux-Test mit 2.3.0](docs/LINUX-TEST-2.3.md)
+Für den bereits eingerichteten Arbeitsplatz beschreibt die Testanleitung das Update, die Vorschau und die Geräteanmeldung für mehrstündige Läufe. [Linux-Test mit 2.3.1](docs/LINUX-TEST-2.3.md)
 
 ### Erster Linux-Test
 
