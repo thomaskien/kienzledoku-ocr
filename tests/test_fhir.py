@@ -41,7 +41,7 @@ class Server:
         self.encounters = {"start": "Patient/a"}
         self.notes = {"a": [], "b": []}
         self.requests = []
-        self.lost = self.misbound = False
+        self.lost = self.misbound = self.hide_notes = False
         self.next = BASE + "?_getpages=second"
         self.total = 2
 
@@ -60,7 +60,7 @@ class Server:
                    "date": DATE, "section": [{"entry": [{"reference": "DocumentReference/d" + pid}]}]}
             notes = [item({"resourceType": "Composition", "subject": doc["subject"], "date": n["effectiveDateTime"],
                            "section": [{"text": {"div": "<div>" + escape(n["valueString"]) + "</div>"}}]})
-                     for n in self.notes[pid]]
+                     for n in self.notes[pid] if not self.hide_notes]
             return response({"resourceType": "Bundle", "entry": [item(doc), *notes]})
         if "/DocumentReference/" in path:
             pid = path[-1]
@@ -108,6 +108,14 @@ class BatchTests(unittest.TestCase):
             run.process("start", patient_filter=pid)
             return run.counts
 
+    def test_failed_commander_stops_only_that_document_before_post(self):
+        from kienzledoku_ocr_backfill.commander import CommanderError
+
+        self.ocr.extract_text.side_effect = [CommanderError("Antwort ungültig"), "zweites Dokument"]
+        self.assertEqual(self.batch(apply=True), {"document_failed": 1, "created_verified": 1})
+        self.assertEqual(len(self.server.notes["a"]), 0)
+        self.assertEqual(len(self.server.notes["b"]), 1)
+
     def test_all_patients_dry_run_only_gets(self):
         self.assertEqual(self.batch(), {"dry_run": 2})
         self.assertEqual({m for m, u in self.server.requests}, {"GET"})
@@ -137,13 +145,49 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(run.counts, {"created_verified": 1})
         self.assertEqual(self.server.notes["a"][0]["identifier"][0]["value"], "other")
 
+    def test_lost_post_response_immediately_verified(self):
+        self.server.lost = True
+        self.assertEqual(self.batch(True, "a"), {"created_verified": 1})
+        self.assertEqual(len(self.server.notes["a"]), 1)
+
+    def test_missing_context_after_ocr_recreated_and_validated(self):
+        old = self.server.open
+        seen = 0
+
+        def expire(req, timeout):
+            nonlocal seen
+            if req.full_url.endswith("/Encounter/start"):
+                seen += 1
+                if seen > 1:
+                    raise HTTPError(req.full_url, 410, "Gone", {}, None)
+            return old(req, timeout)
+        with patch.object(self.server, "open", side_effect=expire):
+            self.assertEqual(self.batch(True, "a"), {"created_verified": 1})
+        self.assertEqual(self.server.notes["a"][0]["identifier"][0]["value"], "other")
+
+    def test_session_loss_after_ocr_resumes_prepared_text(self):
+        old = self.server.open
+        def expire(req, timeout):
+            if req.full_url.endswith("/$eakte") and self.ocr.extract_text.called:
+                raise HTTPError(req.full_url, 401, "Expired", {}, None)
+            return old(req, timeout)
+        with patch.object(self.server, "open", side_effect=expire), self.assertRaises(SessionError):
+            self.batch(True, "a")
+        saved, = self.path.parent.glob("journal.pending/*/*")
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.batch(True, "a"), {"created_verified": 1})
+        self.assertEqual(self.ocr.extract_text.call_count, 1)
+        self.assertFalse(saved.exists())
+
     def test_unconfirmed_create_never_reposted(self):
+        self.server.hide_notes = True
         self.server.lost = True
         self.assertEqual(self.batch(True, "a"), {"unconfirmed": 1})
         notes = self.server.notes["a"][:]
         self.server.notes["a"].clear()
         self.assertEqual(self.batch(True, "a"), {"unconfirmed": 1})
         self.server.notes["a"] = notes
+        self.server.hide_notes = False
         self.assertEqual(self.batch(True, "a"), {"already_ocr": 1})
         self.assertEqual(len([u for m,u in self.server.requests if u.endswith("/Observation")]), 1)
         self.assertNotIn("synthetic-token", self.path.read_text())

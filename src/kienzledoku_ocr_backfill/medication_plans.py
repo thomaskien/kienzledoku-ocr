@@ -29,6 +29,7 @@ class MedicationPlanScanner:
     def __init__(
         self,
         *,
+        keep_bmp_without_amdb: bool = False,
         amdb_remote: Optional[dict] = None,
         amdb_config: Path = DEFAULT_CONFIG,
         amdb_client: Path = DEFAULT_CLIENT,
@@ -40,6 +41,7 @@ class MedicationPlanScanner:
         timeout: float = 300.0,
         progress: Optional[Callable[[str], None]] = None,
     ) -> None:
+        self._keep_bmp_without_amdb = keep_bmp_without_amdb
         self._amdb_remote = amdb_remote
         self._amdb_config = amdb_config
         self._amdb_client = amdb_client
@@ -155,12 +157,14 @@ class MedicationPlanScanner:
                             "error": str(exc)[:1000],
                         }
                     )
-                    self._progress(
-                        f"T2med-AMDB-Abfrage für Medikationsplan auf Seite "
-                        f"{code.page} fehlgeschlagen; daher normale OCR: {exc}"
-                    )
-                    continue
-                if resolver is None and formatted.pzns:
+                    if self._keep_bmp_without_amdb:
+                        formatted = format_bmp(plan, None)
+                    else:
+                        self._progress(f"T2med-AMDB-Abfrage auf Seite {code.page} fehlgeschlagen; daher normale OCR")
+                        continue
+                if formatted.unresolved_pzns and self._keep_bmp_without_amdb:
+                    self._progress(f"Seite {code.page}: {len(formatted.unresolved_pzns)} PZN ohne Stammdaten; Angaben aus dem Code übernommen.")
+                if resolver is None and formatted.pzns and not self._keep_bmp_without_amdb:
                     diagnostics["errors"].append(
                         {
                             "page": code.page,

@@ -6,11 +6,13 @@ import http.client
 import io
 import json
 import re
+import time
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .fhir_model import valid_id
+from .fhir_tls import connection_error, https_handler
 
 PROFILE = "https://fhir.t2med.de/StructureDefinition/FhirApi"
 MAX_JSON = 32 * 1024 * 1024
@@ -76,7 +78,22 @@ class Client:
                    for v in (token, key)):
             raise FhirError("OAuth-Token oder API-Key fehlt oder ist ungültig.")
         self.token, self.key = token, key
-        self.opener = build_opener(ProxyHandler({}), HTTPSHandler(context=tls), NoRedirect())
+        self.refresh = None
+        self.renew_at = None
+        self.opener = build_opener(ProxyHandler({}), https_handler(tls), NoRedirect())
+
+    def set_token_lifetime(self, seconds):
+        self.renew_at = None
+        if isinstance(seconds, (int, str)) and re.fullmatch(r"[0-9]{1,8}", str(seconds)) and int(seconds) > 0:
+            seconds = int(seconds)
+            self.renew_at = time.monotonic() + seconds - min(60, seconds / 5)
+
+    def renew_token(self):
+        try:
+            self.token, lifetime = self.refresh()
+        except (OSError, http.client.HTTPException, ValueError, SessionError):
+            raise SessionError("FHIR-Token konnte nicht erneuert werden. Geräteanmeldung wiederholen.", status=401) from None
+        self.set_token_lifetime(lifetime)
 
     def open(self, url, *, fhir=True, body=None, patient_profile=False):
         parsed = safe_url(url)
@@ -89,6 +106,8 @@ class Client:
                        and parsed.path.startswith("/cdn/") and body is None)
         if not allowed:
             raise FhirError("Verweis liegt außerhalb des freigegebenen T2med-Dienstes.")
+        if self.refresh and self.renew_at is not None and time.monotonic() >= self.renew_at:
+            self.renew_token()
         headers = {"Authorization": "Bearer " + self.token, "Accept-Encoding": "identity"}
         if fhir:
             headers.update({"X-API-Key": self.key, "Accept": "application/fhir+json",
@@ -98,15 +117,21 @@ class Client:
         if body is not None:
             headers.update({"Content-Type": "application/fhir+json", "Prefer": "return=OperationOutcome"})
         request = Request(url, headers=headers, data=json.dumps(body).encode() if body is not None else None)
-        try:
-            return self.opener.open(request, timeout=40)
-        except HTTPError as exc:
-            exc.close()
-            if exc.code == 401 or (exc.code == 403 and (body is not None or patient_profile or "/Encounter/" in parsed.path)):
-                raise SessionError(f"T2med HTTP {exc.code}. Zugriff prüfen und frisch aus T2med starten.", status=exc.code) from None
-            raise FhirError(f"T2med HTTP {exc.code}.", status=exc.code) from None
-        except (OSError, http.client.HTTPException):
-            raise FhirError("T2med-Verbindung fehlgeschlagen.") from None
+        for attempt in range(2):
+            try:
+                return self.opener.open(request, timeout=40)
+            except HTTPError as exc:
+                exc.close()
+                if exc.code == 401 and attempt == 0 and self.refresh:
+                    # An explicit authentication rejection precedes execution on T2med.
+                    self.renew_token()
+                    request.add_header("Authorization", "Bearer " + self.token)
+                    continue
+                if exc.code == 401 or (exc.code == 403 and (body is not None or patient_profile or "/Encounter/" in parsed.path)):
+                    raise SessionError(f"T2med HTTP {exc.code}. Zugriff prüfen und frisch aus T2med starten.", status=exc.code) from None
+                raise FhirError(f"T2med HTTP {exc.code}.", status=exc.code) from None
+            except (OSError, http.client.HTTPException) as exc:
+                raise FhirError(connection_error(exc)) from None
 
     def json(self, url, *, body=None, patient_profile=False):
         with self.open(url, body=body, patient_profile=patient_profile) as response:

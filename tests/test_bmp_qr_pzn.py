@@ -412,6 +412,14 @@ class MedicationPlanIntegrationTests(unittest.TestCase):
         self.assertEqual(scan.pages, {})
         self.assertEqual(scan.diagnostics["errors"][-1]["stage"], "t2med_amdb")
 
+    def test_fhir_retains_bmp_with_unresolved_pzn_when_local_amdb_is_missing(self):
+        extraction = QrExtractionResult("scan.pdf", (qr_code(BMP_XML.encode("iso-8859-1")),), (), 1)
+        with mock.patch("kienzledoku_ocr_backfill.medication_plans.extract_qr_codes", return_value=extraction):
+            scan = MedicationPlanScanner(keep_bmp_without_amdb=True, amdb_config=Path("/missing-service.conf")).scan(Path("scan.pdf"))
+        self.assertEqual(scan.diagnostics["plans"][0]["unresolvedPzns"], ["09322739"])
+        self.assertIn("PZN 09322739", scan.pages[1])
+        self.assertIn("nach dem Essen", scan.pages[1])
+
     def test_scanner_reports_decoder_errors_and_missing_codes(self):
         extraction = QrExtractionResult(
             "scan.pdf",

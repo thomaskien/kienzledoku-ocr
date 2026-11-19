@@ -107,6 +107,8 @@ class OcrmypdfBackend(OcrBackend):
         auto_orient_pages: bool = False,
         orientation_min_confidence: float = 5.0,
         medication_plan_codes: bool = True,
+        clean_page: Optional[Callable[[str, int], str]] = None,
+        keep_bmp_without_amdb: bool = False,
         amdb_remote: Optional[dict] = None,
         amdb_config: Path = Path("/opt/t2med/server/mmi/service.conf"),
         amdb_client: Path = Path("/opt/t2med/server/mariadb/bin/mariadb"),
@@ -147,6 +149,8 @@ class OcrmypdfBackend(OcrBackend):
         self._auto_orient_pages = auto_orient_pages
         self._orientation_min_confidence = orientation_min_confidence
         self._medication_plan_codes = medication_plan_codes
+        self._clean_page = clean_page
+        self._keep_bmp_without_amdb = keep_bmp_without_amdb
         self._amdb_remote = amdb_remote
         self._amdb_config = amdb_config
         self._amdb_client = amdb_client
@@ -535,6 +539,7 @@ class OcrmypdfBackend(OcrBackend):
         if not self._medication_plan_codes:
             return MedicationPlanScan({}, 0, {"disabled": True})
         scanner = MedicationPlanScanner(
+            keep_bmp_without_amdb=self._keep_bmp_without_amdb,
             amdb_remote=self._amdb_remote,
             amdb_config=self._amdb_config,
             amdb_client=self._amdb_client,
@@ -587,6 +592,8 @@ class OcrmypdfBackend(OcrBackend):
                 text = medication_scan.pages[page]
             else:
                 text = self._extract_page_text(output_pdf, page)
+                if self._clean_page:
+                    text = self._clean_page(text, page)
             if text:
                 parts.append(text)
         return "\n\n".join(parts)
@@ -706,7 +713,7 @@ class OcrmypdfBackend(OcrBackend):
                         self._pdftotext,
                         "-enc",
                         "UTF-8",
-                        "-nopgbrk",
+                        *([] if self._clean_page else ["-nopgbrk"]),
                         str(output_pdf),
                         "-",
                     ],
@@ -724,4 +731,7 @@ class OcrmypdfBackend(OcrBackend):
                     raise OcrError(
                         "pdftotext-Ausgabe ist nicht UTF-8-kodiert"
                     ) from exc
+            if self._clean_page:
+                text = "\n\n".join(self._clean_page(page_text, page)
+                                   for page, page_text in enumerate(text.split("\f"), 1) if page_text.strip())
             return text

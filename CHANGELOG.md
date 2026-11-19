@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.0 – 19.11.2026
+
+- Optionale OCR-Bereinigung im Praxis-Commander vor der FHIR-Textanlage. Das Modell kennzeichnet unleserliche Zeilen. Strukturierte BMP-Seiten werden direkt aus dem Code übernommen, auch wenn die lokale AMDB fehlt.
+- Zertifikatsbindung aus dem erprobten Linux-Hotfix 2.0.1 für FHIR, CDN und Geräteanmeldung integriert.
+- Geräteanmeldung mit laufender Token-Erneuerung, Kontextprüfung vor jedem Schreiben, geschütztem OCR-Zwischenspeicher und lesender Kontrolle bei uneindeutiger Schreibantwort.
+
 ## 2.1.0 – 19.11.2026
 
 - Linux-Arbeitsplätze können PZN über einen authentifizierten HTTPS-Dienst auf dem T2med-Server auflösen. Der Dienst fragt das aktive AMDB-Schema über den lokalen MariaDB-Socket lesend ab.

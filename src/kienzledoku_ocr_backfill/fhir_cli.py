@@ -1,19 +1,21 @@
 """Linux entry point for T2med's kienzleocr:// system handler."""
 
 import argparse
+from hashlib import sha256
 import http.client
 import json
 import os
 from pathlib import Path
-import ssl
 import sys
 from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
+from .commander import CommanderCleaner
 from .fhir_backfill import Backfill
 from .fhir_client import Client, FhirError
 from .fhir_device import device_client
 from .fhir_model import valid_id
+from .fhir_tls import TLSConfigurationError, load_tls
 from .journal import Journal
 from .ocr import OcrmypdfBackend
 from .progress import TimestampedReporter
@@ -65,23 +67,30 @@ def main(argv=None):
         cfg = json.loads(args.config.read_text(encoding="utf-8"))
         base = cfg["base_url"]
         ctx, token = parse_link(args.uri or sys.stdin.readline(32770).rstrip("\r\n"), base)
-        tls = ssl.create_default_context(cafile=cfg.get("ca_file") or None)
+        tls = load_tls(cfg)
         client = Client(base, token, cfg["api_key"], tls)
-        ocr = OcrmypdfBackend(progress=report, auto_orient_pages=args.auto_orient_pages,
+        cleaner = CommanderCleaner(cfg["commander_url"], progress=report) if cfg.get("commander_url") else None
+        ocr = OcrmypdfBackend(keep_bmp_without_amdb=True, clean_page=cleaner.clean_page if cleaner else None,
+                              progress=report, auto_orient_pages=args.auto_orient_pages,
                               barcode_retry_dpi=args.barcode_retry_dpi, amdb_remote=cfg.get("amdb_remote"))
         report(f"KienzleDoku OCR {__version__} – " + ("APPLY" if args.apply else "DRY-RUN"))
         with Journal(args.journal) as journal:
-            run = Backfill(client, journal, ocr, report, apply=args.apply)
+            policy = [__version__, cfg.get("commander_url"), cfg.get("amdb_remote"),
+                      args.auto_orient_pages, args.barcode_retry_dpi]
+            profile = sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()
+            run = Backfill(client, journal, ocr, report, apply=args.apply, profile=profile)
             login = None
             if cfg.get("client_id"):
                 login = lambda: device_client(base, cfg["api_key"], cfg["client_id"], tls, report)
+            else:
+                report("Start mit T2med-Aufruftoken. Für die automatische Erneuerung eine OAuth-Client-ID einrichten.")
             run.process(ctx, patient_filter=args.patient, limit=args.limit, login=login)
             report("Zusammenfassung " + json.dumps(run.counts, sort_keys=True))
             return 2 if {"patient_failed", "document_failed", "unconfirmed"} & run.counts.keys() else 0
     except KeyboardInterrupt:
         return 130
     except (FhirError, ValueError, OSError, TypeError, KeyError, AttributeError, RuntimeError, http.client.HTTPException) as exc:
-        detail = str(exc) if isinstance(exc, FhirError) or type(exc) is RuntimeError else type(exc).__name__
+        detail = str(exc) if isinstance(exc, (FhirError, TLSConfigurationError)) or type(exc) is RuntimeError else type(exc).__name__
         report(f"FHIR-Lauf abgebrochen ({detail}). Zugang, Konfiguration und Journal prüfen.")
         return 1
     finally:

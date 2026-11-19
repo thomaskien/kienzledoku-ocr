@@ -12,11 +12,13 @@ import tempfile
 from urllib.parse import urljoin
 
 from . import __version__
+from .commander import CommanderError
 from .errors import OcrError
 from .fhir_client import FhirError, PROFILE, SessionError, check_outcome
 from .fhir_model import FhirDataError, collect_entries, parse_document, plain_text, require_patient, valid_id
 from .formatter import BLOCK_END, compose_text, contains_ocr_marker, first_text_lines, latest_ocr_marker, make_footer
 from .progress import timed_step
+from .pending_text import PendingText, PendingTextError
 
 SOURCE = "KienzleOCR-Quelle "
 MARK = re.compile(re.escape(SOURCE) + r"([a-f0-9]{64})\b")
@@ -47,21 +49,31 @@ class WriteContexts:
         data, _, _ = client.json(client.base + "/Encounter/" + start)
         self.origin = context_parts(data, start)
 
-    def for_patient(self, patient):
+    def for_patient(self, patient, current=None):
         subject = "Patient/" + patient
         _, doctor, org = self.origin
-        identifier = self.start
-        if self.origin[0] != subject or not self.use_start:
-            payload = {"resourceType": "Encounter", "meta": {"profile": [PROFILE + "Encounter|1.0.0"]},
-                       "subject": {"reference": subject}, "serviceProvider": {"reference": org},
-                       "participant": [{"individual": {"reference": doctor}}]}
-            data, status, location = self.client.json(self.client.base + "/Encounter", body=payload)
-            check_outcome(data)
-            match = re.fullmatch(re.escape(self.client.base) + r"/Encounter/([A-Za-z0-9.-]{1,64})(?:/_history/[A-Za-z0-9.-]+)?",
-                                 urljoin(self.client.base + "/", location))
-            if status != 201 or not match or not valid_id(match[1]):
-                raise FhirError("Patientenkontext nicht bestätigt (Status/Location).")
-            identifier = match[1]
+        identifier = current or (self.start if self.use_start and self.origin[0] == subject else None)
+        if identifier:
+            try:
+                data, _, _ = self.client.json(self.client.base + "/Encounter/" + identifier)
+            except FhirError as exc:
+                if exc.status not in (404, 410):
+                    raise
+            else:
+                if context_parts(data, identifier) != (subject, doctor, org):
+                    raise SessionError("Patient, Arztrolle oder Behandlungsort im Schreibkontext weicht ab.")
+                return identifier
+
+        payload = {"resourceType": "Encounter", "meta": {"profile": [PROFILE + "Encounter|1.0.0"]},
+                   "subject": {"reference": subject}, "serviceProvider": {"reference": org},
+                   "participant": [{"individual": {"reference": doctor}}]}
+        data, status, location = self.client.json(self.client.base + "/Encounter", body=payload)
+        check_outcome(data)
+        match = re.fullmatch(re.escape(self.client.base) + r"/Encounter/([A-Za-z0-9.-]{1,64})(?:/_history/[A-Za-z0-9.-]+)?",
+                             urljoin(self.client.base + "/", location))
+        if status != 201 or not match or not valid_id(match[1]):
+            raise FhirError("Patientenkontext nicht bestätigt (Status/Location).")
+        identifier = match[1]
         data, _, _ = self.client.json(self.client.base + "/Encounter/" + identifier)
         if context_parts(data, identifier) != (subject, doctor, org):
             raise SessionError("Patient, Arztrolle oder Behandlungsort im Schreibkontext weicht ab.")
@@ -144,10 +156,11 @@ def create_text(client, context, text, stamp):
 
 
 class Backfill:
-    def __init__(self, client, journal, ocr, report, *, apply=False):
+    def __init__(self, client, journal, ocr, report, *, apply=False, profile=__version__):
         self.client, self.journal, self.ocr, self.report = client, journal, ocr, report
         self.apply = apply
         self.server = sha256(client.base.encode()).hexdigest()
+        self.pending = PendingText(journal.path, self.server, profile) if apply else None
         self.states = {r["fhirKey"]: r for r in journal.records()
                        if "fhirKey" in r and r.get("server") == self.server and
                        r.get("status") in {"create_prepared", "created_verified", "create_rejected"}}
@@ -161,10 +174,11 @@ class Backfill:
 
     def process(self, start, *, patient_filter=None, limit=None, login=None):
         self.contexts = WriteContexts(self.client, start) if self.apply else None
-        if self.apply and login:
+        if login:
             self.client = login()
-            self.contexts.client = self.client
-            self.contexts.use_start = False
+            if self.contexts:
+                self.contexts.client = self.client
+                self.contexts.use_start = False
         with timed_step("FHIR-Patienteninventar", self.report):
             patients = self.client.patients()
         self.report(f"FHIR-Inventar vollständig: {len(patients)} Patienten")
@@ -224,7 +238,7 @@ class Backfill:
     @staticmethod
     def message(exc):
         # Arbitrary payloads, malformed URLs and OAuth credentials never enter progress.
-        return str(exc) if isinstance(exc, (FhirError, FhirDataError)) else type(exc).__name__
+        return str(exc) if isinstance(exc, (FhirError, FhirDataError, CommanderError, PendingTextError)) else type(exc).__name__
 
     def attachment(self, patient, ref, attachment, chart):
         if contains_ocr_marker(attachment["entryText"]):
@@ -243,20 +257,30 @@ class Backfill:
             if previous and previous["status"] == "create_prepared":
                 if self.verified(chart, previous):
                     self.record(previous, "created_verified")
+                    if self.pending:
+                        self.pending.discard(key)
                     self.result("already_ocr", "Frühere Anlage jetzt in der Akte bestätigt")
                 else:
                     self.result("unconfirmed", "Früherer Schreibausgang offen. Journal und eAkte prüfen.")
                 return
             if key in chart.existing:
+                if self.pending:
+                    self.pending.discard(key)
                 self.already_ocr("zugehöriger OCR-Eintrag", [text for _, text in chart.existing[key]])
                 return
             if previous and previous["status"] == "created_verified":
                 self.result("unconfirmed", "Früher bestätigter Eintrag aktuell nicht in der eAkte sichtbar.")
                 return
             self.report("OCR-Status: noch nicht erfolgt")
-            self.report("OCR läuft")
-            with timed_step("OCR gesamt", self.report):
-                text = self.ocr.extract_text(path, "application/pdf")
+            text = self.pending.read(key, stamp) if self.pending else None
+            if text is None:
+                self.report("OCR läuft")
+                with timed_step("OCR gesamt", self.report):
+                    text = self.ocr.extract_text(path, "application/pdf")
+                if self.pending and text.strip():
+                    self.pending.store(key, stamp, text)
+            else:
+                self.report("Vorbereiteten OCR-Text für dieselbe PDF-Prüfsumme wiederverwendet")
         if not text.strip():
             raise FhirError("OCR ergab keinen Text.")
         self.report("OCR erfolgreich")
@@ -264,11 +288,10 @@ class Backfill:
         if not self.apply:
             self.result("dry_run", f"OCR-Eintrag mit {len(text)} Zeichen würde angelegt")
             return
-        if not self.context:
-            self.context = self.contexts.for_patient(patient)
         # Recheck after potentially long OCR. Original may have gained a legacy block.
         fresh = Chart.read(self.client, patient)
         if key in fresh.existing:
+            self.pending.discard(key)
             self.result("already_ocr")
             return
         if ref not in fresh.documents:
@@ -279,6 +302,7 @@ class Backfill:
         if current is None or original_date(current) != stamp:
             raise FhirError("Dokument oder Originaldatum inzwischen geändert.")
         if contains_ocr_marker(current["entryText"]):
+            self.pending.discard(key)
             self.result("already_ocr")
             return
         with tempfile.TemporaryDirectory(prefix="kienzleocr-check-") as work:
@@ -287,22 +311,30 @@ class Backfill:
         record = {"fhirKey": key, "server": self.server, "patient": patient, "documentReference": ref, "attachment": attachment["index"],
                   "fileSha256": digest, "textSha256": sha256(normalized(entry_text).encode()).hexdigest(),
                   "originalDate": stamp}
+        # Revalidate immediately before writing, even for consecutive documents of one patient.
+        self.context = self.contexts.for_patient(patient, self.context)
         self.record(record, "create_prepared")
         try:
             with timed_step("FHIR-Freitext anlegen", self.report):
                 create_text(self.client, self.context, entry_text, stamp)
-        except FhirError as exc:
-            if exc.status in {400, 401, 403, 404, 405, 422}:
+        except DATA_ERRORS as exc:
+            if getattr(exc, "status", None) in {400, 401, 403, 404, 405, 422}:
                 self.record(record, "create_rejected")
                 raise
-            self.result("unconfirmed", "Schreibausgang offen. Beim nächsten Lauf wird die Akte abgeglichen.")
+            self.report("Schreibantwort uneindeutig. Eintrag wird in der Patientenakte nachgelesen.")
+        try:
+            with timed_step("FHIR-Freitext nachlesen", self.report):
+                readback = Chart.read(self.client, patient)
+        except SessionError:
+            raise
+        except DATA_ERRORS:
+            self.result("unconfirmed", "Nachlesen fehlgeschlagen. Journal für den Wiederanlauf erhalten.")
             return
-        with timed_step("FHIR-Freitext nachlesen", self.report):
-            readback = Chart.read(self.client, patient)
         if not self.verified(readback, record):
             self.result("unconfirmed", "Anlage gemeldet, Text und Datum in der eAkte noch nicht bestätigt.")
             return
         self.record(record, "created_verified")
+        self.pending.discard(key)
         self.result("created_verified", "OCR-Eintrag in der Patientenakte nachgelesen")
 
     def already_ocr(self, description, texts):
